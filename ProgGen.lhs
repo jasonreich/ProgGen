@@ -811,7 +811,7 @@ derivation depth, counting function calls.
 
 > conjunction = pro (red False [con False [], (red False [con True [], con False []])])
 >               [cas ( AltR $ arg True
->                    , AltR $ con True [] )]
+>                    , AltR $ arg False )]
 
 > addition = pro (red False [one, one]) 
 >              [cas ( AltR $ arg True
@@ -837,7 +837,7 @@ derivation depth, counting function calls.
 >                  , AltR $ cons (pat head_ref) (red False [pat $ tail_ref, arg True]))
 
 > unitTests = mapM_ (flip depthCheck 1 . good)
->             [inversion, {- conjunction, -} addition, append, applen]
+>             [inversion, conjunction, addition, append, applen]
 
 ===========================
 
