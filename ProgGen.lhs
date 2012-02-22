@@ -298,9 +298,11 @@ Our current working representation is the non-redundant. It assumes;
 - Each function has an arity less-than or equal to two. 
 - No more than two constructors. 
 - Each constructor has an arity less-than or equal to two.
-- Applications reference declarables by arity and index.
-- Case alternatives reference declarables by order and pattern 
-variable use.
+- Case alternatives reference declarables in order.
+- Functions references;
+  *  in function bodies are referenced as itself (False) or the
+     other function (True).
+  *  in main as first (False) and second (True).
 
 > data ProR = ProR ExpR (Seq0'2 BodR)
 >           deriving Eq
@@ -329,15 +331,21 @@ Let us define some generic operations.
 > universeR e@(AppR _ (Seq0'2 es)) = e : concatMap universeR es
 > universeR e = [e]
 >
+> localExpsR :: ExpR -> [BodR] -> [(Bool, ExpR)]
+> localExpsR m eqns = [ (g, x) | (g, bod) <- zip [False, False, True] 
+>                                             $ SoloR m : eqns
+>                              , x   <- expsR bod ]
+>
+>
 > expsR :: BodR -> [ExpR]
 > expsR (SoloR e) = [e]
 > expsR (CaseR (alts1, alts2)) = VarR (ArgR False) 
 >                                : [ e | AltR e <- [alts1, alts2] ]
 > 
-> redsR :: ExpR -> [(Bool, Peano)]
-> redsR (VarR _) = []
-> redsR (AppR d (Seq0'2 es)) = [ (f, plength es) | RedR f <- [d] ]
->                              ++ concatMap redsR es
+> redsR :: Bool -> ExpR -> [(Bool, Peano)]
+> redsR g (VarR _) = []
+> redsR g (AppR d (Seq0'2 es)) = [ (g `xor` f, plength es) | RedR f <- [d] ]
+>                              ++ concatMap (redsR g) es
 >                              
 > argsR :: ExpR -> [Bool]
 > argsR (VarR (ArgR v)) = [v]
@@ -388,6 +396,10 @@ there are only two.
 > implies False _ = True
 > implies True x = x
 >
+> xor :: Bool -> Bool -> Bool
+> xor False x = x
+> xor True  x = not x
+>
 > conj :: Flag Bool -> Pred
 > conj (Flag (flag, x)) = flag |&&| x
 >
@@ -411,32 +423,33 @@ there are only two.
 > deriveArity (ProR m (Seq0'2 eqns)) = do 
 >   let twoReds = sortBy (compare `on` fst) 
 >               $ twoDistinctBy ((==) `on` fst)
->               $ concatMap redsR (m : concatMap expsR eqns)
+>               $ concatMap (uncurry redsR) 
+>               $ localExpsR m eqns
 >   guard ((not.null) twoReds `implies` (not.fst.head) twoReds)
 >   return $ map snd twoReds
 >
 > deriveProg :: ProR -> Flag ProL
 > deriveProg p@(ProR m (Seq0'2 eqns)) = do      
 >   dtL <- dtLM
->   mL <- deriveExpr m
+>   mL <- deriveExpr False m
 >   faLM
->   eqnsL <- mapM deriveRedDef $ zip unsafe_faL eqns
+>   eqnsL <- mapM deriveRedDef $ zip3 [False,True] unsafe_faL eqns
 >   return $ ProL (Seq1 dtL) mL (Seq eqnsL)
 >     where
 >       dtLM@(Flag (_, unsafe_dtL)) = deriveDatatype p
 >       faLM@(Flag (_, unsafe_faL)) = deriveArity p
->       deriveExpr (VarR (ArgR x)) = return $ VarL $ ArgL $ peano x
->       deriveExpr (VarR (PatR p)) = return $ VarL $ PatL $ peano p
->       deriveExpr (AppR (ConR c) (Seq0'2 es)) = do
->         AppL (ConL $ peano c) . Seq <$> mapM deriveExpr es
->       deriveExpr (AppR (RedR f) (Seq0'2 es)) = do
->         AppL (RedL $ peano f) . Seq <$> mapM deriveExpr es
->       deriveRedDef (arity, SoloR e) = do
->         (:=::) arity . SoloL <$> deriveExpr e
->       deriveRedDef (arity, CaseR (alts1, alts2)) = do
+>       deriveExpr _ (VarR (ArgR x)) = return $ VarL $ ArgL $ peano x
+>       deriveExpr _ (VarR (PatR p)) = return $ VarL $ PatL $ peano p
+>       deriveExpr g (AppR (ConR c) (Seq0'2 es)) = do
+>         AppL (ConL $ peano c) . Seq <$> mapM (deriveExpr g) es
+>       deriveExpr g (AppR (RedR f) (Seq0'2 es)) = do
+>         AppL (RedL $ peano $ g `xor` f) . Seq <$> mapM (deriveExpr g) es
+>       deriveRedDef (g, arity, SoloR e) = do
+>         (:=::) arity . SoloL <$> deriveExpr g e
+>       deriveRedDef (g, arity, CaseR (alts1, alts2)) = do
 >         guard $ (plength unsafe_dtL < S (S Z)) 
 >                   `implies` (alts2 == NoAltR)
->         altsL <- sequence [ (:-->::) c <$> deriveExpr e
+>         altsL <- sequence [ (:-->::) c <$> deriveExpr g e
 >                         | (c, AltR e) <- zip peanos [alts1, alts2] ]
 >         return $ arity :=:: CaseL (VarL (ArgL Z)) (Seq1 altsL)
 
@@ -489,7 +502,7 @@ function definition,
 > consistentRedApps :: ProR -> Bool
 > consistentRedApps p@(ProR m (Seq0'2 eqns))
 >   = consistentTwos Nothing Nothing 
->     $ concatMap redsR $ m : concatMap expsR eqns
+>     $ concatMap (uncurry redsR) $ localExpsR m eqns
 
 > wellRed :: ProR -> Flag Bool
 > wellRed p@(ProR _ (Seq0'2 eqns)) = do
@@ -626,22 +639,19 @@ Principle of Caller/Callee Demarcation
 > noConstCase _ = True
 
 > isRecursive :: [BodR] -> [Bool]
-> isRecursive eqns = case eqns of
->   [_,_] | mutRec -> [True, True]
->   otherwise -> selfRec
->   where reds = twoDistinctBy (==) . map fst 
->                . concatMap redsR . expsR
->         selfRec = [ f `elem` reds b
->                   | (f, b) <- zip [False,True] eqns ]
->         mutRec = and [ g `elem` reds b
->                      | (g, b) <- zip [True, False] eqns ]
+> isRecursive eqns
+>   | all or relRefs = [True, True] -- mutual rec
+>   | otherwise = map (not . and) relRefs -- self rec
+>   where relRefs = map (twoDistinctBy (==) . map fst .
+>                        concatMap (redsR False))
+>                   $ map expsR eqns
 
 > noTrivialInlineable :: ProR -> Bool
 > noTrivialInlineable (ProR m (Seq0'2 eqns)) 
 >   = and [ not (allCons e) && S Z < noCalls f 
 >         | (f, SoloR e) <- zip [False,True] eqns ]
 >   where noCalls f = plength $ filter ((==) f . fst) 
->                     $ concatMap redsR $ m : concatMap expsR eqns
+>                     $ concatMap (uncurry redsR) $ localExpsR m eqns
 >         allCons (AppR (ConR _) (Seq0'2 es)) = all allCons es
 >         allCons _ = False
 
@@ -678,19 +688,19 @@ Principle of Dead Computation
 -----------------------------
 
 > noDeadComp :: [BodR] -> Bool
-> noDeadComp eqns = all st (zip [False,True] eqns)
+> noDeadComp eqns = all st eqns
 >   where
 >     redsIn f = case drop (fromEnum f) eqns of
 >       []    -> []
 >       (b:_) -> twoDistinctBy (==) $ map fst 
->                $ concatMap redsR $ expsR b
->     st (f, SoloR e) = ste False f e
->     st (f, e@(CaseR _)) = all (ste True f) (expsR e)
->     ste destr f (VarR _) = True
->     ste destr f (AppR (ConR _) _) = True
->     ste destr f (AppR (RedR g) (Seq0'2 es)) 
+>                $ concatMap (redsR False) $ expsR b
+>     st (SoloR e) = ste False e
+>     st (e@(CaseR _)) = all (ste True) (expsR e)
+>     ste destr (VarR _) = True
+>     ste destr (AppR (ConR _) _) = True
+>     ste destr (AppR (RedR f) (Seq0'2 es)) 
 >       = (destr && or [ True | VarR (PatR _) <- es ]) ||
->         (f `notElem` g : redsIn g && all (ste destr f) es)
+>         (and (f : redsIn f) && all (ste destr) es)
 
 > pdeadCompR :: ProR -> Pred
 > pdeadCompR (ProR _ (Seq0'2 eqns)) = mkPred $ noDeadComp eqns
@@ -700,8 +710,9 @@ Principle of Dead Code
 
 > cheatTrace :: [BodR] -> [[Bool]]
 > cheatTrace eqns = twostep
->   where onestep = map (twoDistinctBy (==) . map fst 
->                       . concatMap redsR. expsR) eqns
+>   where onestep = [ (twoDistinctBy (==) . map fst 
+>                     . concatMap (redsR f) . expsR) x
+>                   | (f, x) <- zip [False,True] eqns ]
 >         twostep = [ twoDistinctBy (==)  
 >                   $ fcalls ++ (guard (g `elem` fcalls) >> gcalls)
 >                   | (f, fcalls) <- zip [False, True] onestep
@@ -712,7 +723,7 @@ Principle of Dead Code
 > noDeadReds (ProR m (Seq0'2 eqns)) 
 >   = plength (twoDistinctBy (==) 
 >              [ (if f then tail else id) calls 
->              | (f, _) <- redsR m ])
+>              | (f, _) <- redsR False m ])
 >     == plength eqns
 >   where calls = cheatTrace eqns
 
@@ -732,7 +743,7 @@ derivation depth, counting function calls.
 >   SoloR (AppR (ConR c) (Seq0'2 es)) -> do
 >     return $ Known c
 >            $ map (bigStepTrace reds fs xs ps curf . SoloR) es
->   SoloR (AppR (RedR f) (Seq0'2 es)) ->     
+>   SoloR (AppR (RedR f_) (Seq0'2 es)) -> let f = curf `xor` f_ in
 >     if reds <= 0
 >        then do
 >          calls <- mlookup (peano f) (cheatTrace fs)
@@ -775,7 +786,7 @@ derivation depth, counting function calls.
 > noDeadAlts :: ProR -> Flag Bool
 > noDeadAlts (ProR m (Seq0'2 eqns)) = do
 >   ((), trace) <- runWriterT
->                 (bigStepTrace 5 eqns [] [] undefined (SoloR m) >>=
+>                 (bigStepTrace 5 eqns [] [] False (SoloR m) >>=
 >                  forceTrace)
 >   return $ traverseTrace (initial False) (initial True) trace
 >   where initial f = case drop (fromEnum f) eqns of
@@ -798,9 +809,9 @@ derivation depth, counting function calls.
 >              [cas ( AltR $ con True []
 >                   , NoAltR)]
 
-> conjunction = pro (red False [con False [], con False []]) 
->               [cas ( AltR $ con True []
->                    , NoAltR)]
+> conjunction = pro (red False [con False [], (red False [con True [], con False []])])
+>               [cas ( AltR $ arg True
+>                    , AltR $ con True [] )]
 
 > addition = pro (red False [one, one]) 
 >              [cas ( AltR $ arg True
@@ -821,12 +832,12 @@ derivation depth, counting function calls.
 >        app_ref = not len_ref
 >        tail_ref = not head_ref
 >        len = cas ( AltR $ arg False
->                  , AltR $ cons nil (red len_ref [pat $ tail_ref]))
+>                  , AltR $ cons nil (red False [pat $ tail_ref]))
 >        app = cas ( AltR $ arg True
->                  , AltR $ cons (pat head_ref) (red app_ref [pat $ tail_ref, arg True]))
+>                  , AltR $ cons (pat head_ref) (red False [pat $ tail_ref, arg True]))
 
 > unitTests = mapM_ (flip depthCheck 1 . good)
->             [inversion, addition, append, applen]
+>             [inversion, {- conjunction, -} addition, append, applen]
 
 ===========================
 
@@ -847,4 +858,4 @@ derivation depth, counting function calls.
 >             | (i, pred) <- zip names experiments ]    
 
 > main = do hSetBuffering stdout NoBuffering
->           pruneStats good 5 >>= print -- defaultMain criterion
+>           pruneStats good 4 >>= print -- defaultMain criterion
