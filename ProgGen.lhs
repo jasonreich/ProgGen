@@ -1,8 +1,8 @@
-% ProgGen, LazyCheck variant
+% ProgGen
 % jason,mfn,colin
-% Forked 5/12/11
+% 21/11/11
 
-+ > module ProgGen-LC where
++ > module ProgGen where
 
 Notes & Gotchas
 ===============
@@ -26,7 +26,7 @@ Introduction
 This is a library that uses LazySmallCheck to generate canonical 
 first-order functional programs programs.
 
-> import Test.LazyCheck hiding (depth)
+> import Test.LazySmallCheck
 
 > import Criterion.Main
 > import Control.Applicative
@@ -36,9 +36,6 @@ first-order functional programs programs.
 > import Data.List
 > import Data.Maybe
 > import System.IO
-
-> (<.>) :: Series a -> (Int -> Int) -> Series a
-> xs <.> f = Series $ unSeries xs . f
 
 Small sequences
 ---------------
@@ -51,11 +48,12 @@ These will be useful later on.
 >   show (Seq0'2 xs) = show xs
 > 
 > instance Serial a => Serial (Seq0'2 a) where
->   series = (Seq0'2 <$> Series children0'2) <.> (+1)
->
-> children0'2 baseDepth = unSeries list (min baseDepth 2)
->   where list = pure [] <|>
->                pure (:) <*> (series <.> const (baseDepth - 1)) <*> list
+>   series = (cons Seq0'2 >< children0'2) . (+1)
+> 
+> children0'2 d = list (min 2 d)
+>   where
+>     list = cons []
+>         \/ cons (:) >< const (series (d-1)) >< list
 
 Our Language
 ============
@@ -90,7 +88,7 @@ And we can have a pretty printer associated with it.
 >       : map show eqns ++ ["> " ++ show m ]
 > 
 > instance Show ConDef where
->    show (c :# Nat arity) = concat $ 
+>    show (c :# N arity) = concat $ 
 >     show (Con c) : [' ' | arity > 0] 
 >     : intersperse " " (replicate arity "D")
 >    showList xs = (++) $ intercalate " | " (map show xs)
@@ -169,20 +167,20 @@ And translate this form into our original.
 >         (npe m)
 >         (Seq [ Seq1 (f : take a digits)
 >                := npb e
->              | (f, Nat a :=: e) <- zip digits eqns ])
+>              | (f, N a :=: e) <- zip digits eqns ])
 >   where
 >     digits = map Id ['0'..'9']
 >     npb (SoloP e) = Solo (npe e)
 >     npb (CaseP s (Seq1 alts)) = Case (npe s) $ Seq1
 >                                 [ Seq1 (digits !! c : take a digits)
 >                                   :--> npe e
->                                 | Nat c :-->: e <- alts 
->                                 , let Nat a = cons !! c ]
->     npe (VarP (ArgP (Nat v))) = Var $ Arg $ digits !! v
->     npe (VarP (PatP (Nat v))) = Var $ Pat $ digits !! v
->     npe (AppP (ConP (Nat c)) (Seq es)) 
+>                                 | N c :-->: e <- alts 
+>                                 , let N a = cons !! c ]
+>     npe (VarP (ArgP (N v))) = Var $ Arg $ digits !! v
+>     npe (VarP (PatP (N v))) = Var $ Pat $ digits !! v
+>     npe (AppP (ConP (N c)) (Seq es)) 
 >       = App (Con (digits !! c)) (Seq (map npe es))
->     npe (AppP (RedP (Nat f)) (Seq es)) 
+>     npe (AppP (RedP (N f)) (Seq es)) 
 >       = App (Red (digits !! f)) (Seq (map npe es))
 
 > instance Show ProP where
@@ -272,18 +270,18 @@ And translate this form into the previous.
 > 
 > natProL :: ProL -> ProP
 > natProL (ProL (Seq1 cons) m (Seq eqns)) 
->   = ProP (Seq1 (map (Nat . val) cons)) (nple m) (Seq (map nplr eqns))
+>   = ProP (Seq1 (map (N . val) cons)) (nple m) (Seq (map nplr eqns))
 >   where
->     nple (VarL (ArgL v)) = VarP $ ArgP $ Nat $ val v
->     nple (VarL (PatL v)) = VarP $ PatP $ Nat $ val v
+>     nple (VarL (ArgL v)) = VarP $ ArgP $ N $ val v
+>     nple (VarL (PatL v)) = VarP $ PatP $ N $ val v
 >     nple (AppL (ConL c) (Seq es)) 
->       = AppP (ConP (Nat $ val c)) (Seq (map nple es))
+>       = AppP (ConP (N $ val c)) (Seq (map nple es))
 >     nple (AppL (RedL f) (Seq es)) 
->       = AppP (RedP (Nat $ val f)) (Seq (map nple es))
->     nplr (a :=:: b) = Nat (val a) :=: nplb b
+>       = AppP (RedP (N $ val f)) (Seq (map nple es))
+>     nplr (a :=:: b) = N (val a) :=: nplb b
 >     nplb (SoloL e) = SoloP (nple e)
 >     nplb (CaseL s (Seq1 alts)) 
->       = CaseP (nple s) (Seq1 [ Nat (val a) :-->: nple e
+>       = CaseP (nple s) (Seq1 [ N (val a) :-->: nple e
 >                              | a :-->:: e <- alts ])
 > 
 > instance Show ProL where
@@ -388,8 +386,8 @@ there are only two.
 > implies False _ = True
 > implies True x = x
 >
-> conj :: Flag Bool -> Pred
-> conj (Flag (flag, x)) = flag |&&| x
+> conj :: Flag Bool -> Property
+> conj (Flag (flag, x)) = flag |&| x
 >
 > mlookup :: MonadPlus m => Peano -> [a] -> m a
 > mlookup _ [] = mzero
@@ -460,17 +458,17 @@ over the recursive structure ExpR.
 >            | otherwise = error "SmallCheck.depth: argument < 0"
 >
 > instance Serial ProR where
->    series = cons2 ProR <.> depth 0
+>    series = cons2 ProR . depth 0
 > instance Serial BodR where
->    series = (cons1 SoloR <|> cons1 CaseR) <.> depth 0
+>    series = (cons1 SoloR \/ cons1 CaseR) . depth 0
 > instance Serial ExpR where
->    series = (cons1 VarR <|> cons2 AppR)
+>    series = (cons1 VarR \/ cons2 AppR)
 > instance Serial VarIdR where
->    series = (cons1 ArgR <|> cons1 PatR) <.> depth 0
+>    series = (cons1 ArgR \/ cons1 PatR) . depth 0
 > instance Serial DecIdR where
->    series = (cons1 ConR <|> cons1 RedR) <.> depth 0
+>    series = (cons1 ConR \/ cons1 RedR) . depth 0
 > instance Serial AltR where
->    series = (cons0 NoAltR <|> cons1 AltR) <.> depth 0
+>    series = (cons0 NoAltR \/ cons1 AltR) . depth 0
 
 Validity
 ========
@@ -519,14 +517,14 @@ function definition,
 > wellCase (CaseR (NoAltR, NoAltR)) = False
 > wellCase _ = True
 
-> pvalidR :: ProR -> Pred
+> pvalidR :: ProR -> Property
 > pvalidR p@(ProR m (Seq0'2 eqns)) 
->   = consistentRedApps p |&&|
->     conj (wellRed p) |&&|
->     consistentConApps p |&&|
->     conj (wellCon p) |&&|
->     wellVar False m |&&|
->     and [ wellVar True e | SoloR e <- eqns ] |&&|
+>   = consistentRedApps p |&|
+>     conj (wellRed p) |&|
+>     consistentConApps p |&|
+>     conj (wellCon p) |&|
+>     wellVar False m |&|
+>     and [ wellVar True e | SoloR e <- eqns ] |&|
 >     all wellCase eqns
 
 Principles of Canonicity
@@ -577,11 +575,11 @@ use and constructor references.
 >         check (S (S Z):_) (True:_) = False
 >         check _ _ = True
 
-> porduseR :: ProR -> Pred
-> porduseR p = conj (ordConArities p) |&&|
->              conj (ordEqns p) |&&|
->              conj (seqArgs p) |&&| 
->              conj (maxPats p) |&&|
+> porduseR :: ProR -> Property
+> porduseR p = conj (ordConArities p) |&|
+>              conj (ordEqns p) |&|
+>              conj (seqArgs p) |&| 
+>              conj (maxPats p) |&|
 >              conj (seqPats p)
 
 Principle of Caller/Callee Demarcation
@@ -663,15 +661,15 @@ Principle of Caller/Callee Demarcation
 > noDupArgs = all (any snd) . groupBy ((==) `on` fst) 
 >             . sortBy (compare `on` fst) . concatMap binaryApps
 
-> pcallerR :: ProR -> Pred
+> pcallerR :: ProR -> Property
 > pcallerR p@(ProR m (Seq0'2 eqns)) = 
->     noSoloId eqns |&&|
->     all noCaseId eqns |&&|
->     all noRenamings eqns |&&|
->     all noReconsArg eqns |&&|
->     all noConstCase eqns |&&|
->     noTrivialInlineable p |&&|
->     all noCommonCtx (zip (isRecursive eqns) eqns) |&&|
+>     noSoloId eqns |&|
+>     all noCaseId eqns |&|
+>     all noRenamings eqns |&|
+>     all noReconsArg eqns |&|
+>     all noConstCase eqns |&|
+>     noTrivialInlineable p |&|
+>     all noCommonCtx (zip (isRecursive eqns) eqns) |&|
 >     noDupArgs (m : concatMap expsR eqns)
 
 Principle of Dead Computation
@@ -692,8 +690,8 @@ Principle of Dead Computation
 >       = (destr && or [ True | VarR (PatR _) <- es ]) ||
 >         (f `notElem` g : redsIn g && all (ste destr f) es)
 
-> pdeadCompR :: ProR -> Pred
-> pdeadCompR (ProR _ (Seq0'2 eqns)) = mkPred $ noDeadComp eqns
+> pdeadCompR :: ProR -> Property
+> pdeadCompR (ProR _ (Seq0'2 eqns)) = lift $ noDeadComp eqns
 
 Principle of Dead Code
 ----------------------
@@ -782,8 +780,8 @@ derivation depth, counting function calls.
 >                       (CaseR (a, b):_) -> (a /= NoAltR, b /= NoAltR)
 >                       _ -> (False, False)
 
-> pdeadCodeR :: ProR -> Pred
-> pdeadCodeR p = noDeadReds p |&&| conj (noDeadAlts p)
+> pdeadCodeR :: ProR -> Property
+> pdeadCodeR p = noDeadReds p |&| conj (noDeadAlts p)
 
 ===========================
 
@@ -825,14 +823,14 @@ derivation depth, counting function calls.
 >        app = cas ( AltR $ arg True
 >                  , AltR $ cons (pat head_ref) (red app_ref [pat $ tail_ref, arg True]))
 
-> unitTests = mapM_ (flip depthCheck 1 . good)
+> unitTests = mapM_ (depthCheck 1 . good)
 >             [inversion, addition, append, applen]
 
 ===========================
 
 > principles = [ pvalidR, porduseR, pcallerR, pdeadCompR, pdeadCodeR ]
 
-> combine xs p = foldr1 (|&&|) $ map ($ p) xs
+> combine xs p = foldr1 (|&|) $ map ($ p) xs
 
 > experiments = map combine $ tail $ inits principles
 
@@ -843,8 +841,10 @@ derivation depth, counting function calls.
 > names = lines "Validity\n+ Ordering + Use\n+Caller/Callee\n+Dead Computation\n+Dead Code"
 
 > criterion = [ bench i $
->               depthCheck (\x -> pred x *==>* True) 3
+>               depthCheck 3 (\x -> pred x >=> True)
 >             | (i, pred) <- zip names experiments ]    
 
 > main = do hSetBuffering stdout NoBuffering
->           pruneStats good 5 >>= print -- defaultMain criterion
+>           defaultMain criterion
+
+
