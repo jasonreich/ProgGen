@@ -30,6 +30,7 @@ first-order functional programs programs.
 
 > import Criterion.Main
 > import Control.Applicative
+> import Control.Arrow
 > import Control.Monad (foldM, guard, MonadPlus(..))
 > import Control.Monad.Writer.Lazy hiding ((>=>), lift)
 > import Data.Function
@@ -367,6 +368,9 @@ And derive the positional form from the non-redundant. We shall
 assume that all constructors must be referenced in an application but 
 there are only two.
 
+> twoDistinct :: Eq a => [a] -> [a]
+> twoDistinct = twoDistinctBy (==)
+
 > twoDistinctBy :: (a -> a -> Bool) -> [a] -> [a]
 > twoDistinctBy f [] = []
 > twoDistinctBy f (x:xs) = x : case filter (not . f x) xs of
@@ -564,7 +568,7 @@ use and constructor references.
 > seqArgs :: ProR -> Flag Bool
 > seqArgs p@(ProR _ (Seq0'2 eqns)) = do
 >   arities <- deriveArity p
->   return $ and [ (twoDistinctBy (==) $ concatMap argsR $ expsR b) 
+>   return $ and [ (twoDistinct $ concatMap argsR $ expsR b) 
 >                  ==  ptake a [False, True]
 >                | (a, b) <- zip arities eqns ]
 
@@ -642,7 +646,7 @@ Principle of Caller/Callee Demarcation
 > isRecursive eqns
 >   | all or relRefs = [True, True] -- mutual rec
 >   | otherwise = map (not . and) relRefs -- self rec
->   where relRefs = map (twoDistinctBy (==) . map fst .
+>   where relRefs = map (twoDistinct . map fst .
 >                        concatMap (redsR False))
 >                   $ map expsR eqns
 
@@ -692,7 +696,7 @@ Principle of Dead Computation
 >   where
 >     redsIn f = case drop (fromEnum f) eqns of
 >       []    -> []
->       (b:_) -> twoDistinctBy (==) $ map fst 
+>       (b:_) -> twoDistinct $ map fst 
 >                $ concatMap (redsR False) $ expsR b
 >     st (SoloR e) = ste False e
 >     st (e@(CaseR _)) = all (ste True) (expsR e)
@@ -710,10 +714,10 @@ Principle of Dead Code
 
 > cheatTrace :: [BodR] -> [[Bool]]
 > cheatTrace eqns = twostep
->   where onestep = [ (twoDistinctBy (==) . map fst 
+>   where onestep = [ (twoDistinct . map fst 
 >                     . concatMap (redsR f) . expsR) x
 >                   | (f, x) <- zip [False,True] eqns ]
->         twostep = [ twoDistinctBy (==)  
+>         twostep = [ twoDistinct  
 >                   $ fcalls ++ (guard (g `elem` fcalls) >> gcalls)
 >                   | (f, fcalls) <- zip [False, True] onestep
 >                   , let g = not f
@@ -721,7 +725,7 @@ Principle of Dead Code
 >
 > noDeadReds :: ProR -> Bool
 > noDeadReds (ProR m (Seq0'2 eqns)) 
->   = plength (twoDistinctBy (==) 
+>   = plength (twoDistinct 
 >              [ (if f then tail else id) calls 
 >              | (f, _) <- redsR False m ])
 >     == plength eqns
@@ -795,6 +799,104 @@ derivation depth, counting function calls.
 
 > pdeadCodeR :: ProR -> Pred
 > pdeadCodeR p = noDeadReds p |&&| conj (noDeadAlts p)
+
+Canonicalisation
+================
+
+> bmap :: (ExpR -> ExpR) -> BodR -> BodR
+> bmap f (SoloR e) = SoloR (f e)
+> bmap f (CaseR (e0, e1)) = CaseR (amap f e0, amap f e1)
+
+> amap :: (ExpR -> ExpR) -> AltR -> AltR
+> amap f NoAltR   = NoAltR
+> amap f (AltR e) = AltR (f e)
+
+> alt2M :: AltR -> Maybe ExpR
+> alt2M NoAltR   = Nothing
+> alt2M (AltR e) = Just e
+
+Design choices:
+- Each should be independent and require only validity.
+- Repeated application should converge.
+
+> condSwap True  [e0, e1] = Seq0'2 [e1, e0]
+> condSwap _     es       = Seq0'2 es
+
+> fOrdArg :: ProR -> ProR
+> fOrdArg (ProR m (Seq0'2 eqns)) 
+>   = ProR (oa False m) (Seq0'2 $ zipWith oab isBad eqns)
+>   where isBad = map (not . go . concatMap argsR . expsR) eqns
+>           where go vs = null vs || (not . head) vs
+>         oab = bmap . oa
+>         oa :: Bool -> ExpR -> ExpR
+>         oa self (VarR (ArgR x)) = VarR (ArgR (self `xor` x))
+>         oa _    (VarR (PatR p)) = VarR (PatR p)
+>         oa self (AppR (ConR c) (Seq0'2 es)) 
+>           = AppR (ConR c) (Seq0'2 $ oa self `map` es)
+>         oa self (AppR (RedR f) (Seq0'2 es)) 
+>           = AppR (RedR f) (condSwap (isBad !! fromEnum f) (oa self `map` es))
+
+> fUseArg :: ProR -> ProR
+> fUseArg (ProR m (Seq0'2 eqns)) = ProR (ua m) (Seq0'2 $ map (bmap ua) eqns)
+>   where fArity = map (length . nub . concatMap argsR . expsR) eqns
+>         ua (VarR v) = VarR v
+>         ua (AppR (RedR f) (Seq0'2 xs)) = AppR (RedR f) (Seq0'2 $ take (fArity !! fromEnum f) $ map ua xs)
+>         ua (AppR (ConR c) (Seq0'2 xs)) = AppR (ConR c) (Seq0'2 $ map ua xs)
+
+> fOrdPat :: ProR -> ProR
+> fOrdPat (ProR m (Seq0'2 eqns))
+>   = ProR (op False m) (Seq0'2 $ map opb eqns)
+>   where (badA, badB) = (go . concat . catMaybes *** go . concat . catMaybes) $
+>                        unzip [ (go' *** go') a_AB
+>                              | CaseR a_AB <- eqns
+>                              , let go' e = alt2M e >>= Just . patsR ]
+>           where go vs = not (null vs || (not.head) vs)
+>         isBad False = badA
+>         isBad True = badB
+>         opb (SoloR e) = SoloR (op False e)
+>         opb (CaseR (e_A, e_B)) = CaseR (amap (op badA) e_A, amap (op badB) e_B)
+>         op self (VarR (ArgR x)) = VarR (ArgR x)
+>         op self (VarR (PatR p)) = VarR (PatR (self `xor` p))
+>         op self (AppR (ConR c) (Seq0'2 es)) 
+>           = AppR (ConR c) (condSwap (isBad c) (op self `map` es))
+>         op self (AppR (RedR f) (Seq0'2 es)) 
+>           = AppR (RedR f) (Seq0'2 $ op self `map` es)
+
+> fUsePat :: ProR -> ProR
+> fUsePat (ProR m (Seq0'2 eqns)) = ProR (up m) (Seq0'2 $ map (bmap up) eqns)
+>   where (arA, arB) = (go *** go) $
+>                      unzip [ (go' *** go') a_AB
+>                            | CaseR a_AB <- eqns
+>                            , let go' e = alt2M e >>= Just . patsR ]
+>           where go = length . nub . concat . catMaybes
+>         cArity False = arA
+>         cArity True = arB
+>         up (VarR v) = VarR v
+>         up (AppR (RedR f) (Seq0'2 xs)) = AppR (RedR f) (Seq0'2 $ map up xs)
+>         up (AppR (ConR c) (Seq0'2 xs)) = AppR (ConR c) (Seq0'2 $ take (cArity c) $ map up xs)
+
+> fOrdCon :: ProR -> ProR
+> fOrdCon p@(ProR m (Seq0'2 eqns)) 
+>   | isBad = ProR (oc m) (Seq0'2 $ map ocb eqns)
+>   | True  = ProR m (Seq0'2 eqns)
+>   where isBad = not $ uncurry (&&) $ runFlag $ ordConArities p
+>         ocb (SoloR e) = SoloR (oc e)
+>         ocb (CaseR (e_A, e_B)) = CaseR (amap oc e_B, amap oc e_A)
+>         oc (VarR v) = VarR v
+>         oc (AppR (ConR c) (Seq0'2 es)) = AppR (ConR $ not c) (Seq0'2 $ map oc es)
+>         oc (AppR (RedR f) (Seq0'2 es)) = AppR (RedR f) (Seq0'2 $ map oc es)
+
+> fOrdEqn :: ProR -> ProR
+> fOrdEqn p@(ProR m (Seq0'2 eqns)) 
+>   | isBad = ProR (oe m) (condSwap True $ map (bmap oe) eqns)
+>   | True  = ProR m (Seq0'2 eqns)
+>   where isBad = not $ uncurry (&&) $ runFlag $ ordEqns p
+>         oe (VarR v) = VarR v
+>         oe (AppR (ConR c) (Seq0'2 es)) = AppR (ConR c) (Seq0'2 $ map oe es)
+>         oe (AppR (RedR f) (Seq0'2 es)) = AppR (RedR $ not f) (Seq0'2 $ map oe es)
+
+> prop_canon1 p = (pvalidR p |&&| pneg (porduseR p)) *==>* 
+>                 porduseR (fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat $ p)
 
 ===========================
 
