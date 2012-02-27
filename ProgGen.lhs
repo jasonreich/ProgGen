@@ -37,6 +37,7 @@ first-order functional programs programs.
 > import Data.List
 > import Data.Maybe
 > import System.IO
+> import Debug.Trace
 
 > (<.>) :: Series a -> (Int -> Int) -> Series a
 > xs <.> f = Series $ unSeries xs . f
@@ -347,7 +348,7 @@ Let us define some generic operations.
 > redsR g (VarR _) = []
 > redsR g (AppR d (Seq0'2 es)) = [ (g `xor` f, plength es) | RedR f <- [d] ]
 >                              ++ concatMap (redsR g) es
->                              
+>
 > argsR :: ExpR -> [Bool]
 > argsR (VarR (ArgR v)) = [v]
 > argsR (VarR (PatR _)) = []
@@ -819,29 +820,34 @@ Design choices:
 - Each should be independent and require only validity.
 - Repeated application should converge.
 
+> forBac :: [a] -> [[a]]
+> forBac []    = []
+> forBac [x]   = [[x]]
+> forBac [x,y] = [[x, y], [y, x]]
+
 > condSwap True  [e0, e1] = Seq0'2 [e1, e0]
 > condSwap _     es       = Seq0'2 es
 
 > fOrdArg :: ProR -> ProR
 > fOrdArg (ProR m (Seq0'2 eqns)) 
->   = ProR (oa False m) (Seq0'2 $ zipWith oab isBad eqns)
+>   = ProR (oa isBad m) (Seq0'2 $ zipWith oab (forBac isBad) eqns)
 >   where isBad = map (not . go . concatMap argsR . expsR) eqns
 >           where go vs = null vs || (not . head) vs
 >         oab = bmap . oa
->         oa :: Bool -> ExpR -> ExpR
->         oa self (VarR (ArgR x)) = VarR (ArgR (self `xor` x))
+>         oa :: [Bool] -> ExpR -> ExpR
+>         oa isBad' (VarR (ArgR x)) = VarR (ArgR (head isBad' `xor` x))
 >         oa _    (VarR (PatR p)) = VarR (PatR p)
->         oa self (AppR (ConR c) (Seq0'2 es)) 
->           = AppR (ConR c) (Seq0'2 $ oa self `map` es)
->         oa self (AppR (RedR f) (Seq0'2 es)) 
->           = AppR (RedR f) (condSwap (isBad !! fromEnum f) (oa self `map` es))
+>         oa isBad' (AppR (ConR c) (Seq0'2 es)) 
+>           = AppR (ConR c) (Seq0'2 $ oa isBad' `map` es)
+>         oa isBad' (AppR (RedR f) (Seq0'2 es)) 
+>           = AppR (RedR f) (condSwap (isBad' !! fromEnum f) (oa isBad' `map` es))
 
 > fUseArg :: ProR -> ProR
-> fUseArg (ProR m (Seq0'2 eqns)) = ProR (ua m) (Seq0'2 $ map (bmap ua) eqns)
+> fUseArg (ProR m (Seq0'2 eqns)) = ProR (ua fArity m) (Seq0'2 $ zipWith (bmap . ua) (forBac fArity) eqns)
 >   where fArity = map (length . nub . concatMap argsR . expsR) eqns
->         ua (VarR v) = VarR v
->         ua (AppR (RedR f) (Seq0'2 xs)) = AppR (RedR f) (Seq0'2 $ take (fArity !! fromEnum f) $ map ua xs)
->         ua (AppR (ConR c) (Seq0'2 xs)) = AppR (ConR c) (Seq0'2 $ map ua xs)
+>         ua fArity' (VarR v) = VarR v
+>         ua fArity' (AppR (RedR f) (Seq0'2 xs)) = AppR (RedR f) (Seq0'2 $ take (fArity' !! fromEnum f) $ map (ua fArity') xs)
+>         ua fArity' (AppR (ConR c) (Seq0'2 xs)) = AppR (ConR c) (Seq0'2 $ map (ua fArity') xs)
 
 > fOrdPat :: ProR -> ProR
 > fOrdPat (ProR m (Seq0'2 eqns))
@@ -888,7 +894,7 @@ Design choices:
 
 > fOrdEqn :: ProR -> ProR
 > fOrdEqn p@(ProR m (Seq0'2 eqns)) 
->   | isBad = ProR (oe m) (condSwap True $ map (bmap oe) eqns)
+>   | isBad = ProR (oe m) (condSwap True $ eqns)
 >   | True  = ProR m (Seq0'2 eqns)
 >   where isBad = not $ uncurry (&&) $ runFlag $ ordEqns p
 >         oe (VarR v) = VarR v
