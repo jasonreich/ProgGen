@@ -196,7 +196,16 @@ Intermediate Form: Peano
 We have another intermediate form which uses positional naming, 
 represented by lazy peano naturals.
 
-> data Peano = Z | S Peano deriving (Show, Eq, Ord)
+> data Peano = Z | S Peano deriving (Show, Eq)
+>
+> instance Ord Peano where
+>  Z   <= _   = True
+>  S _ <= Z   = False
+>  S m <= S n = m <= n
+>
+>  _   < Z   = False
+>  Z   < S _ = True
+>  S m < S n = m < n
 >
 > ptake :: Peano -> [a] -> [a]
 > ptake Z     _      = []
@@ -919,8 +928,9 @@ Design choices:
 >         ne (AppR (RedR f) (Seq0'2 es)) = AppR (RedR $ False) (Seq0'2 $ map ne es)
 > fNeqEqn p = p
 
-> prop_canon1 p = (pvalidR p |&&| pneg (porduseR p)) *==>* 
->                 porduseR (fNeqEqn . fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat $ p)
+> forduseR = fNeqEqn . fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat
+> prop_forduseR p = (pvalidR p |&&| pneg (porduseR p)) *==>* (pvalidR p' |||| porduseR p')
+>   where p' = forduseR $ p
 
 ===========================
 
@@ -984,4 +994,4 @@ Design choices:
 >             | (i, pred) <- zip names experiments ]    
 
 > main = do hSetBuffering stdout NoBuffering
->           pruneStats good 4 >>= print -- defaultMain criterion
+>           defaultMain criterion
