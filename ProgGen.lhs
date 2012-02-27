@@ -528,10 +528,19 @@ function definition,
 >   return $ (plength dt < S (S Z)) `implies`
 >            all noSndAlt eqns
 
-> wellVar :: Bool -> ExpR -> Bool
-> wellVar flag (VarR (ArgR _)) = flag
-> wellVar flag (VarR (PatR _)) = False
-> wellVar flag (AppR _ (Seq0'2 es)) = all (wellVar flag) es
+> wellVar :: [Peano] -> Peano ->  BodR -> Bool
+> wellVar cArs fAr b = case b of
+>   SoloR e          -> wv Z e
+>   CaseR (e_A, e_B) -> Z < fAr && (and $ zipWith wv cArs $ [ e | AltR e <- [e_A, e_B] ])
+>   where wv cAr (VarR (ArgR x)) = peano x < fAr
+>         wv cAr (VarR (PatR p)) = peano p < cAr
+>         wv cAr (AppR _ (Seq0'2 es)) = all (wv cAr) es
+
+> wellVarEqns :: ProR -> Flag Bool
+> wellVarEqns p@(ProR _ (Seq0'2 eqns)) = do
+>   fArs <- deriveArity p
+>   cArs <- deriveDatatype p
+>   return $ and $ zipWith (wellVar cArs) fArs eqns
 
 > wellCase :: BodR -> Bool
 > wellCase (CaseR (NoAltR, NoAltR)) = False
@@ -543,8 +552,8 @@ function definition,
 >     conj (wellRed p) |&&|
 >     consistentConApps p |&&|
 >     conj (wellCon p) |&&|
->     wellVar False m |&&|
->     and [ wellVar True e | SoloR e <- eqns ] |&&|
+>     wellVar [] Z (SoloR m) |&&|
+>     conj (wellVarEqns p) |&&|
 >     all wellCase eqns
 
 Principles of Canonicity
@@ -901,8 +910,17 @@ Design choices:
 >         oe (AppR (ConR c) (Seq0'2 es)) = AppR (ConR c) (Seq0'2 $ map oe es)
 >         oe (AppR (RedR f) (Seq0'2 es)) = AppR (RedR $ not f) (Seq0'2 $ map oe es)
 
+> fNeqEqn :: ProR -> ProR
+> fNeqEqn p@(ProR m (Seq0'2 [b0, b1])) 
+>   | isBad = ProR (ne m) (Seq0'2 [bmap ne b0])
+>   where isBad = b0 == b1
+>         ne (VarR v) = VarR v
+>         ne (AppR (ConR c) (Seq0'2 es)) = AppR (ConR c) (Seq0'2 $ map ne es)
+>         ne (AppR (RedR f) (Seq0'2 es)) = AppR (RedR $ False) (Seq0'2 $ map ne es)
+> fNeqEqn p = p
+
 > prop_canon1 p = (pvalidR p |&&| pneg (porduseR p)) *==>* 
->                 porduseR (fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat $ p)
+>                 porduseR (fNeqEqn . fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat $ p)
 
 ===========================
 
