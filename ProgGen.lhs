@@ -663,28 +663,36 @@ Principle of Caller/Callee Demarcation
 
 > isRecursive :: [BodR] -> [Bool]
 > isRecursive eqns
->   | all or relRefs = [True, True] -- mutual rec
->   | otherwise = map (not . and) relRefs -- self rec
+>   = [ (not . and) fRefs || mutRec | fRefs <- relRefs ]
 >   where relRefs = map (twoDistinct . map fst .
 >                        concatMap (redsR False))
 >                   $ map expsR eqns
+>         mutRec = all or relRefs
+
+Non-recursive, non-casey and no sharing.
 
 > noTrivialInlineable :: ProR -> Bool
+> noTrivialInlineable (ProR m (Seq0'2 eqns)) 
+>   = and [ (plength . concatMap argsR . expsR) b < S (S Z)
+>         && rec
+>         | (b@(SoloR _), rec) <- zip eqns (isRecursive eqns) ]
+
+> {- noTrivialInlineable :: ProR -> Bool
 > noTrivialInlineable (ProR m (Seq0'2 eqns)) 
 >   = and [ not (allCons e) && S Z < noCalls f 
 >         | (f, SoloR e) <- zip [False,True] eqns ]
 >   where noCalls f = plength $ filter ((==) f . fst) 
 >                     $ concatMap (uncurry redsR) $ localExpsR m eqns
 >         allCons (AppR (ConR _) (Seq0'2 es)) = all allCons es
->         allCons _ = False
+>         allCons _ = False -}
 
 > noCommonCtx :: (Bool, BodR) -> Bool
-> noCommonCtx (False, CaseR ( AltR (AppR d1 (Seq0'2 es1))
+> noCommonCtx (rec, CaseR ( AltR (AppR d1 (Seq0'2 es1))
 >                           , AltR (AppR d2 (Seq0'2 es2))))
->   | d1 == d2 = and [ (not.null.patsR) e1 
->                      || (notElem False . argsR) e1
->                      || e1 /= e2
->                    | (e1, e2) <- zip es1 es2 ]
+>   | d1 == d2 = rec || and [ (not.null.patsR) e1 
+>                           || (notElem False . argsR) e1
+>                           || e1 /= e2
+>                           | (e1, e2) <- zip es1 es2 ]
 > noCommonCtx _ = True
 
 > binaryApps :: ExpR -> [(Bool, Bool)]
@@ -985,7 +993,14 @@ Design choices:
 >         cc b = b
 
 > fInlineTrivial :: ProR -> ProR
-> fInlineTrivial = undefined
+> fInlineTrivial (ProR m (Seq0'2 eqns)) = undefined
+>   where ff = undefined
+
+> fcallerR = fCaseConst . fCaseId . fReconsArgs . fRenamings . fSoloId
+> prop_fcallerR_can p = (pvalidR p |&&| pneg (pcallerR p)) *==>* (pvalidR p' *==>* pcallerR p')
+>   where p' = fcallerR $ p
+> prop_fcallerR_ide p = (pvalidR p |&&| pcallerR p) *==>* (p == p')
+>   where p' = fcallerR $ p
 
 ===========================
 
