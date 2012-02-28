@@ -929,8 +929,63 @@ Design choices:
 > fNeqEqn p = p
 
 > forduseR = fNeqEqn . fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat
-> prop_forduseR p = (pvalidR p |&&| pneg (porduseR p)) *==>* (pvalidR p' |||| porduseR p')
+> prop_forduseR_can p = (pvalidR p |&&| pneg (porduseR p)) *==>* (pvalidR p' *==>* porduseR p')
 >   where p' = forduseR $ p
+> prop_forduseR_ide p = (pvalidR p |&&| porduseR p) *==>* (p == p')
+>   where p' = forduseR $ p
+
+> fSoloId :: ProR -> ProR
+> fSoloId (ProR m (Seq0'2 eqns)) = ProR (si m) (Seq0'2 eqns')
+>   where isBad = map (== SoloR (VarR (ArgR False))) eqns
+>         eqns' = map (bmap si . snd) $ filter (not . fst) $ zip isBad eqns
+>         si (AppR (RedR f) (Seq0'2 [x])) | f && or isBad = si x
+>         si (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map si es)
+>         si x = x
+
+> fRenamings :: ProR -> ProR
+> fRenamings (ProR m (Seq0'2 eqns)) = ProR (rn m) (Seq0'2 $ map (bmap rn) eqns)
+>   where isBad = map go eqns
+>         go (SoloR (AppR d (Seq0'2 es))) 
+>           | or $ zipWith ((/=) . VarR . ArgR) [False,True] es
+>           = Just d
+>         go _ = Nothing
+>         rn (AppR (RedR f) (Seq0'2 es)) = AppR (RedR f `fromMaybe` (isBad !! fromEnum f)) (Seq0'2 $ map rn es)
+>         rn (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map rn es)
+>         rn x = x
+
+> fReconsArgs :: ProR -> ProR
+> fReconsArgs (ProR m (Seq0'2 eqns)) = ProR m (Seq0'2 $ map rab eqns)
+>   where rab (SoloR e) = SoloR e
+>         rab (CaseR (e_A, e_B)) = CaseR (amap (ra False) e_A, amap (ra True) e_B)
+>         ra c' (AppR (ConR c) (Seq0'2 es)) 
+>           | c == c' && and (zipWith ((==) . VarR . PatR) [False,True] es) 
+>           = VarR (ArgR False)
+>         ra c' (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map (ra c') es)
+>         ra _ x = x
+
+> fCaseId :: ProR -> ProR
+> fCaseId (ProR m (Seq0'2 eqns)) = ProR (ci m) (Seq0'2 eqns')
+>   where isBad = map go eqns
+>         go (CaseR (a_A, a_B)) = go' a_A && go' a_B
+>         go _ = False
+>         go' (AltR (VarR (ArgR False))) = True
+>         go' (AltR _) = False
+>         go' _ = True
+>         eqns' = map (bmap ci . snd) $ filter (not . fst) $ zip isBad eqns
+>         ci (AppR (RedR f) (Seq0'2 [x])) | f && or isBad = ci x
+>         ci (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map ci es)
+>         ci x = x
+
+> fCaseConst :: ProR -> ProR
+> fCaseConst (ProR m (Seq0'2 eqns)) = ProR m (Seq0'2 $ map cc eqns)
+>   where cc (CaseR (AltR x_A, AltR x_B)) 
+>           | x_A == x_B && null (patsR x_A) = SoloR x_A
+>           | x_A == arg False && x_B == con False [] = SoloR x_B
+>           | x_B == arg False && x_A == con True [] = SoloR x_A
+>         cc b = b
+
+> fInlineTrivial :: ProR -> ProR
+> fInlineTrivial = undefined
 
 ===========================
 
