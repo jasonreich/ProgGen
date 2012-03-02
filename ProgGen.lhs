@@ -673,18 +673,9 @@ Non-recursive, non-casey and no sharing.
 
 > noTrivialInlineable :: ProR -> Bool
 > noTrivialInlineable (ProR m (Seq0'2 eqns)) 
->   = and [ (plength . concatMap argsR . expsR) b < S (S Z)
->         && rec
->         | (b@(SoloR _), rec) <- zip eqns (isRecursive eqns) ]
-
-> {- noTrivialInlineable :: ProR -> Bool
-> noTrivialInlineable (ProR m (Seq0'2 eqns)) 
->   = and [ not (allCons e) && S Z < noCalls f 
->         | (f, SoloR e) <- zip [False,True] eqns ]
->   where noCalls f = plength $ filter ((==) f . fst) 
->                     $ concatMap (uncurry redsR) $ localExpsR m eqns
->         allCons (AppR (ConR _) (Seq0'2 es)) = all allCons es
->         allCons _ = False -}
+>   = and [ S Z < (plength . argsR) x
+>         || rec
+>         | (SoloR x, rec) <- zip eqns (isRecursive eqns) ]
 
 > noCommonCtx :: (Bool, BodR) -> Bool
 > noCommonCtx (rec, CaseR ( AltR (AppR d1 (Seq0'2 es1))
@@ -937,7 +928,7 @@ Design choices:
 > fNeqEqn p = p
 
 > forduseR = fNeqEqn . fOrdEqn . fOrdCon . fUsePat . fOrdPat . fUseArg . fUsePat
-> prop_forduseR_can p = (pvalidR p |&&| pneg (porduseR p)) *==>* (pvalidR p' *==>* porduseR p')
+> prop_forduseR_can p = pvalidR p *==>* (pvalidR p' *==>* porduseR p')
 >   where p' = forduseR $ p
 > prop_forduseR_ide p = (pvalidR p |&&| porduseR p) *==>* (p == p')
 >   where p' = forduseR $ p
@@ -980,7 +971,7 @@ Design choices:
 >         go' (AltR _) = False
 >         go' _ = True
 >         eqns' = map (bmap ci . snd) $ filter (not . fst) $ zip isBad eqns
->         ci (AppR (RedR f) (Seq0'2 [x])) | f && or isBad = ci x
+>         ci (AppR (RedR True) (Seq0'2 [x])) | or isBad = ci x
 >         ci (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map ci es)
 >         ci x = x
 
@@ -992,12 +983,18 @@ Design choices:
 >           | x_B == arg False && x_A == con True [] = SoloR x_A
 >         cc b = b
 
-> fInlineTrivial :: ProR -> ProR
-> fInlineTrivial (ProR m (Seq0'2 eqns)) = undefined
->   where ff = undefined
+> {- fInlineTrivial :: ProR -> ProR
+> fInlineTrivial (ProR m (Seq0'2 eqns)) 
+>   = ProR (inl isBad m) (Seq0'2 $ zipWith inl (forBac isBad) eqns)
+>   where isBad = zipWith go (isRecursive eqns) eqns
+>         go False (SoloR x) | (plength . argsR) x < S (S Z) = Just x
+>         go _ _ = Nothing
+>         inl sub (AppR (RedR f) (Seq0'2 es)) = undefined
+>         inl sub (AppR d (Seq0'2 es)) = AppR d (Seq0'2 $ map (inl sub) es)
+>         inl sub x = x -}
 
 > fcallerR = fCaseConst . fCaseId . fReconsArgs . fRenamings . fSoloId
-> prop_fcallerR_can p = (pvalidR p |&&| pneg (pcallerR p)) *==>* (pvalidR p' *==>* pcallerR p')
+> prop_fcallerR_can p = pvalidR p *==>* (pvalidR p' *==>* pcallerR p')
 >   where p' = fcallerR $ p
 > prop_fcallerR_ide p = (pvalidR p |&&| pcallerR p) *==>* (p == p')
 >   where p' = fcallerR $ p
