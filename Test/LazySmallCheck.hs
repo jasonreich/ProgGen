@@ -164,7 +164,7 @@ floats d = [ encodeFloat sig exp
            , odd sig || sig == 0 && exp == 0
            ]
 
-newtype Nat = N Int
+newtype Nat = N Int deriving (Eq, Ord)
 
 instance Serial Nat where
   series d = drawnFrom $ map N [0..d]
