@@ -190,6 +190,45 @@ And translate this form into our original.
 > instance Show ProP where
 >   show = show . nameProP
 
+> instance Serial ProP where
+>    series = cons3 ProP <.> depth 0
+
+> instance Serial RedDefP where
+>    series = cons2 (:=:) <.> depth 0
+
+> instance Serial BodP where
+>    series = (cons1 SoloP <|> cons2 CaseP) <.> depth 0
+
+> instance Serial ExpP where
+>    series = cons1 VarP <|> cons2 AppP
+
+> instance Serial VarIdP where
+>    series = (cons1 ArgP <|> cons1 PatP) <.> depth 0
+
+> instance Serial DecIdP where
+>    series = (cons1 ConP <|> cons1 RedP) <.> depth 0
+
+> instance Serial AltP where
+>    series = cons2 (:-->:) <.> depth 0
+
+> indexThen :: Nat -> [a] -> (a -> Bool) -> Bool
+> indexThen (Nat i) xs f = (not.null) xs' && head xs'
+>   where xs' = map f (drop i xs)
+
+> valid :: ProP -> Bool
+> valid (ProP (Seq1 cons) m (Seq eqns)) = valide (Nat 0) (Nat 0) m && all validr eqns
+>  where
+>    valide a _ (VarP (ArgP v))     =  a /= Nat 0 && v < a
+>    valide _ p (VarP (PatP v))     =  p /= Nat 0 && v < p
+>    valide a p (AppP d (Seq es))  =  bound d (length es) && all (valide a p) es
+
+>    bound (ConP c) n  =  indexThen c cons  (\ n'         -> Nat n == n')
+>    bound (RedP f) n  =  indexThen f eqns  (\(n' :=: _)  -> Nat n == n')
+
+>    validr (a :=: (SoloP e)) = valide a (Nat 0) e
+>    validr (a :=: (CaseP s (Seq1 alts))) = valide a (Nat 0) s 
+>      && and  [ indexThen c cons (\p -> valide a p e) | (c :-->: e) <- alts ] 
+
 Intermediate Form: Peano
 ========================
 

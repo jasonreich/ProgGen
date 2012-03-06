@@ -548,9 +548,9 @@ instance Serial Int where
 instance Serial Integer where
   series = Series $ \d -> drawnFrom $ map toInteger [(-d)..d]
 
-newtype Nat = Nat { unNat :: Int }
+newtype Nat = Nat { unNat :: Int } deriving (Eq,Ord)
 
-newtype Natural = Natural { unNatural :: Integer }
+newtype Natural = Natural { unNatural :: Integer } deriving (Eq,Ord)
 
 instance Show Nat where show = show . unNat
 instance Show Natural where show = show . unNatural
