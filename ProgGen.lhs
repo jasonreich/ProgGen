@@ -2,6 +2,8 @@
 % jason,mfn,colin
 % Forked 5/12/11
 
+> {-# LANGUAGE DeriveFunctor #-}
+
 + > module ProgGen-LC where
 
 Notes & Gotchas
@@ -36,6 +38,8 @@ first-order functional programs programs.
 > import Data.Function
 > import Data.List
 > import Data.Maybe
+> import Data.Set (Set)
+> import qualified Data.Set as Set
 > import System.IO
 > import Debug.Trace
 
@@ -47,7 +51,7 @@ Small sequences
 
 These will be useful later on.
 
-> newtype Seq0'2 a = Seq0'2 [a] deriving (Ord,Eq)
+> newtype Seq0'2 a = Seq0'2 [a] deriving (Ord,Eq, Functor)
 > 
 > instance Show a => Show (Seq0'2 a) where
 >   show (Seq0'2 xs) = show xs
@@ -146,22 +150,29 @@ We have an intermediate form which uses positional naming,
 represented by integers.
 
 > data ProP = ProP (Seq1 Nat) ExpP (Seq RedDefP)
+>  deriving (Eq, Ord)
 > 
 > data RedDefP = Nat :=: BodP   -- Function definitions
+>  deriving (Eq, Ord)
 > 
 > data BodP = SoloP ExpP
 >           | CaseP ExpP (Seq1 AltP)
+>  deriving (Eq, Ord)
 > 
 > data ExpP = VarP VarIdP           -- Variables
 >           | AppP DecIdP (Seq ExpP) -- Applications
+>  deriving (Eq, Ord)
 > 
 > data VarIdP = ArgP Nat
 >             | PatP Nat
+>  deriving (Eq, Ord)
 > 
 > data DecIdP = ConP Nat
 >             | RedP Nat
+>  deriving (Eq, Ord)
 > 
 > data AltP = Nat :-->: ExpP    -- Case alternatives
+>  deriving (Eq, Ord)
 
 And translate this form into our original.
 
@@ -228,6 +239,61 @@ And translate this form into our original.
 >    validr (a :=: (SoloP e)) = valide a (Nat 0) e
 >    validr (a :=: (CaseP s (Seq1 alts))) = valide a (Nat 0) s 
 >      && and  [ indexThen c cons (\p -> valide a p e) | (c :-->: e) <- alts ] 
+
+> orderedBy f (x : y : zs) = f x y && orderedBy f (y:zs)
+> orderedBy _ _ = True
+
+> isSequence (Nat hi) = and . zipWith (==) [ Nat n | n <- [0.. hi - 1] ]
+
+> consUse :: [Nat] -> [Nat] -> Bool
+> consUse defs = aux (map (map fst) $ groupBy ((==) `on` snd) $ zipWith ((,) . Nat) [0..] defs)
+>   where aux [] [] = True
+>         aux _  [] = False
+>         aux [] _ = False
+>         aux gdefs (c:cs) = any ((==) c . head) gdefs &&
+>                            aux (rem c gdefs) cs
+>         rem x ((y:ys):zs) | x == y    = if null ys then zs else ys : zs
+>                           | otherwise = (y:ys) : rem x zs
+
+> fixSet :: [Set Nat] -> Set Nat -> Set Nat
+> fixSet repo input | input == output = output
+>                   | otherwise = fixSet repo output
+>   where output = Set.unions $ input :
+>                  [ repo !! i | Nat i <- Set.toList input, i < length repo ]
+
+> redsP b = case b of
+>   SoloP x -> redsPe x
+>   CaseP x (Seq1 as) -> concatMap redsPe $ x : [y | _ :-->: y <- as ]
+> redsPe (VarP _) = []
+> redsPe (AppP d (Seq xs)) = [ f | RedP f <- [d] ] ++ concatMap redsPe xs
+
+> consP b = case b of
+>   SoloP x -> consPe x
+>   CaseP x (Seq1 as) -> concat (consPe x : [ c : consPe y | c :-->: y <- as ])
+> consPe (VarP _) = []
+> consPe (AppP d (Seq xs)) = [ c | ConP c <- [d] ] ++ concatMap consPe xs
+
+> argsP b = case b of
+>   SoloP x -> aux x
+>   CaseP x (Seq1 as) -> concatMap aux $ x : [y | _ :-->: y <- as ]
+>   where aux (VarP (ArgP v)) = [v]
+>         aux (VarP (PatP _)) = []
+>         aux (AppP _ (Seq xs)) = concatMap aux xs
+
+> reachable :: ExpP -> [RedDefP] -> Bool
+> reachable m eqns = Set.fromList (zipWith (const . Nat) [0..] eqns) ==
+>                    fixSet [ Set.fromList $ consP b | _ :=: b <- eqns ] (Set.fromList $ redsPe m)
+
+> ordUseP :: ProP -> Pred
+> ordUseP (ProP (Seq1 cons) m (Seq eqns)) 
+>   = orderedBy (<=) cons |&&|
+>     orderedBy (<)  eqns |&&|
+>     and [ orderedBy (<) [ c | c :-->: _ <- alts ] 
+>         | _ :=: CaseP _ (Seq1 alts) <- eqns ] |&&|
+>     and [ isSequence ar $ nub $ argsP b
+>         | ar :=: b <- eqns ] |&&|
+>     consUse cons (consPe m ++ concat [ consP b | _ :=: b <- eqns ]) |&&|
+>     reachable m eqns
 
 Intermediate Form: Peano
 ========================
@@ -354,61 +420,65 @@ Our current working representation is the non-redundant. It assumes;
      other function (True).
   *  in main as first (False) and second (True).
 
-> data ProR = ProR ExpR (Seq0'2 BodR)
+> newtype Abs = Abs {unAbs :: Bool} deriving (Show, Eq, Ord)
+> newtype Rel = Rel {unRel :: Bool} deriving (Show, Eq, Ord)
+
+> data ProR = ProR (ExpR Abs) (Seq0'2 BodR)
 >           deriving Eq
 >
-> data BodR = SoloR ExpR
+> data BodR = SoloR (ExpR Rel)
 >           | CaseR (AltR, AltR)
 >           deriving (Show, Eq, Ord)
 >
+>
 > data AltR = NoAltR
->           | AltR ExpR
+>           | AltR (ExpR Rel)
 >           deriving (Show, Eq, Ord)
 >
-> data ExpR = VarR VarIdR
->           | AppR DecIdR (Seq0'2 ExpR)
->           deriving (Show, Eq, Ord)
+> data ExpR a = VarR VarIdR
+>             | AppR (DecIdR a) (Seq0'2 (ExpR a))
+>             deriving (Show, Eq, Ord, Functor)
 >
 > data VarIdR = ArgR Bool | PatR Bool
 >             deriving (Show, Eq, Ord)
 >
-> data DecIdR = ConR Bool | RedR Bool
->             deriving (Show, Eq, Ord)
+> data DecIdR a = ConR Bool | RedR a
+>                 deriving (Show, Eq, Ord, Functor)
 
 Let us define some generic operations.
 
-> universeR :: ExpR -> [ExpR]
+> universeR :: ExpR a -> [ExpR a]
 > universeR e@(AppR _ (Seq0'2 es)) = e : concatMap universeR es
 > universeR e = [e]
 >
-> localExpsR :: ExpR -> [BodR] -> [(Bool, ExpR)]
-> localExpsR m eqns = [ (g, x) | (g, bod) <- zip [False, False, True] 
->                                             $ SoloR m : eqns
+> localExpsR :: ExpR Abs -> [BodR] -> [(Bool, ExpR Rel)]
+> localExpsR m eqns = (False, fmap (Rel . unAbs) m) :
+>                     [ (g, x) | (g, bod) <- zip [False, True] eqns
 >                              , x   <- expsR bod ]
 >
 >
-> expsR :: BodR -> [ExpR]
+> expsR :: BodR -> [ExpR Rel]
 > expsR (SoloR e) = [e]
 > expsR (CaseR (alts1, alts2)) = VarR (ArgR False) 
 >                                : [ e | AltR e <- [alts1, alts2] ]
 > 
-> redsR :: Bool -> ExpR -> [(Bool, Peano)]
+> redsR :: Bool -> ExpR Rel -> [(Bool, Peano)]
 > redsR g (VarR _) = []
-> redsR g (AppR d (Seq0'2 es)) = [ (g `xor` f, plength es) | RedR f <- [d] ]
+> redsR g (AppR d (Seq0'2 es)) = [ (g `xor` f, plength es) | RedR (Rel f) <- [d] ]
 >                              ++ concatMap (redsR g) es
 >
-> argsR :: ExpR -> [Bool]
+> argsR :: ExpR a -> [Bool]
 > argsR (VarR (ArgR v)) = [v]
 > argsR (VarR (PatR _)) = []
 > argsR (AppR _ (Seq0'2 es)) = concatMap argsR es
 >
-> consR :: ExpR -> [(Bool, Peano)]
+> consR :: ExpR a -> [(Bool, Peano)]
 > consR (VarR _) = []
 > consR (AppR d (Seq0'2 es)) = [ (c, plength es) 
 >                              | ConR c <- [d] ]
 >                              ++ concatMap consR es
 >
-> patsR :: ExpR -> [Bool]
+> patsR :: ExpR a -> [Bool]
 > patsR (VarR (ArgR _)) = []
 > patsR (VarR (PatR v)) = [v]
 > patsR (AppR _ (Seq0'2 es)) = concatMap patsR es
@@ -467,7 +537,7 @@ there are only two.
 > deriveDatatype :: ProR -> Flag [Peano]
 > deriveDatatype (ProR m (Seq0'2 eqns)) = do 
 >   let twoCons = twoDistinctBy ((==) `on` fst)
->               $ concatMap consR (m : concatMap expsR eqns)
+>               $ consR m ++ concatMap consR (concatMap expsR eqns)
 >   guard ((not.null) twoCons && similarFirst twoCons && 
 >          elem False (map fst twoCons))
 >   return $ map snd $ sortBy (compare `on` fst) $ twoCons
@@ -484,7 +554,7 @@ there are only two.
 > deriveProg :: ProR -> Flag ProL
 > deriveProg p@(ProR m (Seq0'2 eqns)) = do      
 >   dtL <- dtLM
->   mL <- deriveExpr False m
+>   mL <- deriveExpr False $ fmap (Rel . unAbs) m
 >   faLM
 >   eqnsL <- mapM deriveRedDef $ zip3 [False,True] unsafe_faL eqns
 >   return $ ProL (Seq1 dtL) mL (Seq eqnsL)
@@ -495,7 +565,7 @@ there are only two.
 >       deriveExpr _ (VarR (PatR p)) = return $ VarL $ PatL $ peano p
 >       deriveExpr g (AppR (ConR c) (Seq0'2 es)) = do
 >         AppL (ConL $ peano c) . Seq <$> mapM (deriveExpr g) es
->       deriveExpr g (AppR (RedR f) (Seq0'2 es)) = do
+>       deriveExpr g (AppR (RedR (Rel f)) (Seq0'2 es)) = do
 >         AppL (RedL $ peano $ g `xor` f) . Seq <$> mapM (deriveExpr g) es
 >       deriveRedDef (g, arity, SoloR e) = do
 >         (:=::) arity . SoloL <$> deriveExpr g e
@@ -525,18 +595,24 @@ over the recursive structure ExpR.
 > depth d d' | d >= 0    = d'+1-d
 >            | otherwise = error "SmallCheck.depth: argument < 0"
 >
+> instance Serial Abs where
+>    series = cons1 Abs <.> depth 0
+> instance Serial Rel where
+>    series = cons1 Rel <.> depth 0
+
 > instance Serial ProR where
 >    series = cons2 ProR <.> depth 0
 > instance Serial BodR where
 >    series = (cons1 SoloR <|> cons1 CaseR) <.> depth 0
-> instance Serial ExpR where
+> instance Serial a => Serial (ExpR a) where
 >    series = (cons1 VarR <|> cons2 AppR)
 > instance Serial VarIdR where
 >    series = (cons1 ArgR <|> cons1 PatR) <.> depth 0
-> instance Serial DecIdR where
+> instance Serial a => Serial (DecIdR a) where
 >    series = (cons1 ConR <|> cons1 RedR) <.> depth 0
 > instance Serial AltR where
 >    series = (cons0 NoAltR <|> cons1 AltR) <.> depth 0
+
 
 Validity
 ========
@@ -565,7 +641,7 @@ function definition,
 > consistentConApps :: ProR -> Bool
 > consistentConApps p@(ProR m (Seq0'2 eqns))
 >   = consistentTwos Nothing Nothing 
->     $ concatMap consR $ m : concatMap expsR eqns
+>     $ consR m ++ concatMap consR (concatMap expsR eqns)
 
 > noSndAlt (CaseR (_, AltR _)) = False
 > noSndAlt _ = True
@@ -576,7 +652,7 @@ function definition,
 >   return $ (plength dt < S (S Z)) `implies`
 >            all noSndAlt eqns
 
-> wellVar :: [Peano] -> Peano ->  BodR -> Bool
+> wellVar :: [Peano] -> Peano -> BodR -> Bool
 > wellVar cArs fAr b = case b of
 >   SoloR e          -> wv Z e
 >   CaseR (e_A, e_B) -> Z < fAr && (and $ zipWith wv cArs $ [ e | AltR e <- [e_A, e_B] ])
@@ -600,7 +676,7 @@ function definition,
 >     conj (wellRed p) |&&|
 >     consistentConApps p |&&|
 >     conj (wellCon p) |&&|
->     wellVar [] Z (SoloR m) |&&|
+>     wellVar [] Z (SoloR . fmap (Rel . unAbs) $ m) |&&|
 >     conj (wellVarEqns p) |&&|
 >     all wellCase eqns
 
@@ -675,7 +751,7 @@ Principle of Caller/Callee Demarcation
 > noReconsArg (SoloR _) = True
 > noReconsArg (CaseR (alt1, alt2)) = all (noRecons' False) (universe' alt1) &&
 >                                    all (noRecons' True) (universe' alt2)
->   where noRecons' :: Bool -> ExpR -> Bool
+>   where noRecons' :: Eq a => Bool -> ExpR a -> Bool
 >         noRecons' c (AppR (ConR c') (Seq0'2 es))
 >           | c == c' = not $ and $ zipWith (==) es 
 >                        [ VarR (PatR p) | p <- [False, True] ]
@@ -708,13 +784,21 @@ Principle of Caller/Callee Demarcation
 >                   $ map expsR eqns
 >         mutRec = all or relRefs
 
+> isSelfRecursive :: BodR -> Bool
+> isSelfRecursive = not . and . twoDistinct . map fst . 
+>                   concatMap (redsR False) . expsR
+
+> isMutRecursive :: [BodR] -> Bool
+> isMutRecursive = and . map (or . twoDistinct . map fst . 
+>                  concatMap (redsR False) . expsR)
+
 Non-recursive, non-casey and no sharing.
 
 > noTrivialInlineable :: ProR -> Bool
 > noTrivialInlineable (ProR m (Seq0'2 eqns)) 
 >   = and [ S Z < (plength . argsR) x
->         || rec
->         | (SoloR x, rec) <- zip eqns (isRecursive eqns) ]
+>         || isSelfRecursive b
+>         | b@(SoloR x) <- eqns ]
 
 > noCommonCtx :: (Bool, BodR) -> Bool
 > noCommonCtx (rec, CaseR ( AltR (AppR d1 (Seq0'2 es1))
@@ -725,12 +809,12 @@ Non-recursive, non-casey and no sharing.
 >                           | (e1, e2) <- zip es1 es2 ]
 > noCommonCtx _ = True
 
-> binaryApps :: ExpR -> [(Bool, Bool)]
+> binaryApps :: Eq a => ExpR a -> [(Bool, Bool)]
 > binaryApps (AppR (ConR c) (Seq0'2 [x, y])) = (c, x /= y) : 
 >                                       concatMap binaryApps [x,y]
 > binaryApps _ = []
 
-> noDupArgs :: [ExpR] -> Bool
+> noDupArgs :: Eq a => [ExpR a] -> Bool
 > noDupArgs = all (any snd) . groupBy ((==) `on` fst) 
 >             . sortBy (compare `on` fst) . concatMap binaryApps
 
@@ -743,7 +827,7 @@ Non-recursive, non-casey and no sharing.
 >     all noConstCase eqns |&&|
 >     noTrivialInlineable p |&&|
 >     all noCommonCtx (zip (isRecursive eqns) eqns) |&&|
->     noDupArgs (m : concatMap expsR eqns)
+>     noDupArgs (concatMap expsR (SoloR (fmap (Rel . unAbs) m) : eqns))
 
 Principle of Dead Computation
 -----------------------------
@@ -759,7 +843,7 @@ Principle of Dead Computation
 >     st (e@(CaseR _)) = all (ste True) (expsR e)
 >     ste destr (VarR _) = True
 >     ste destr (AppR (ConR _) _) = True
->     ste destr (AppR (RedR f) (Seq0'2 es)) 
+>     ste destr (AppR (RedR (Rel f)) (Seq0'2 es)) 
 >       = (destr && or [ True | VarR (PatR _) <- es ]) ||
 >         (and (f : redsIn f) && all (ste destr) es)
 
@@ -784,7 +868,7 @@ Principle of Dead Code
 > noDeadReds (ProR m (Seq0'2 eqns)) 
 >   = plength (twoDistinct 
 >              [ (if f then tail else id) calls 
->              | (f, _) <- redsR False m ])
+>              | (f, _) <- redsR False $ fmap (Rel . unAbs) m ])
 >     == plength eqns
 >   where calls = cheatTrace eqns
 
@@ -804,7 +888,7 @@ derivation depth, counting function calls.
 >   SoloR (AppR (ConR c) (Seq0'2 es)) -> do
 >     return $ Known c
 >            $ map (bigStepTrace reds fs xs ps curf . SoloR) es
->   SoloR (AppR (RedR f_) (Seq0'2 es)) -> let f = curf `xor` f_ in
+>   SoloR (AppR (RedR (Rel f_)) (Seq0'2 es)) -> let f = curf `xor` f_ in
 >     if reds <= 0
 >        then do
 >          calls <- mlookup (peano f) (cheatTrace fs)
@@ -847,7 +931,7 @@ derivation depth, counting function calls.
 > noDeadAlts :: ProR -> Flag Bool
 > noDeadAlts (ProR m (Seq0'2 eqns)) = do
 >   ((), trace) <- runWriterT
->                 (bigStepTrace 5 eqns [] [] False (SoloR m) >>=
+>                 (bigStepTrace 5 eqns [] [] False (SoloR $ fmap (Rel . unAbs) m) >>=
 >                  forceTrace)
 >   return $ traverseTrace (initial False) (initial True) trace
 >   where initial f = case drop (fromEnum f) eqns of
@@ -860,15 +944,16 @@ derivation depth, counting function calls.
 Canonicalisation
 ================
 
-> bmap :: (ExpR -> ExpR) -> BodR -> BodR
+> {-
+> bmap :: (ExpR Rel -> ExpR Rel) -> BodR -> BodR
 > bmap f (SoloR e) = SoloR (f e)
 > bmap f (CaseR (e0, e1)) = CaseR (amap f e0, amap f e1)
 
-> amap :: (ExpR -> ExpR) -> AltR -> AltR
+> amap :: (ExpR Rel -> ExpR Rel) -> AltR -> AltR
 > amap f NoAltR   = NoAltR
 > amap f (AltR e) = AltR (f e)
 
-> alt2M :: AltR -> Maybe ExpR
+> alt2M :: AltR -> Maybe (ExpR Rel)
 > alt2M NoAltR   = Nothing
 > alt2M (AltR e) = Just e
 
@@ -890,7 +975,7 @@ Design choices:
 >   where isBad = map (not . go . concatMap argsR . expsR) eqns
 >           where go vs = null vs || (not . head) vs
 >         oab = bmap . oa
->         oa :: [Bool] -> ExpR -> ExpR
+>         oa :: [Bool] -> ExpR a -> ExpR a
 >         oa isBad' (VarR (ArgR x)) = VarR (ArgR (head isBad' `xor` x))
 >         oa _    (VarR (PatR p)) = VarR (PatR p)
 >         oa isBad' (AppR (ConR c) (Seq0'2 es)) 
@@ -1037,6 +1122,7 @@ Design choices:
 >   where p' = fcallerR $ p
 > prop_fcallerR_ide p = (pvalidR p |&&| pcallerR p) *==>* (p == p')
 >   where p' = fcallerR $ p
+> -}
 
 ===========================
 
@@ -1044,28 +1130,32 @@ Design choices:
 > pat x = VarR (PatR x)
 > con c xs = AppR (ConR c) (Seq0'2 xs)
 > red f xs = AppR (RedR f) (Seq0'2 xs)
+> f0 xs = AppR (RedR $ Abs False) (Seq0'2 xs)
+> f1 xs = AppR (RedR $ Abs True) (Seq0'2 xs)
+> rec xs = AppR (RedR $ Rel False) (Seq0'2 xs)
+> oth xs = AppR (RedR $ Rel True) (Seq0'2 xs)
 > cas ab = CaseR ab
 > pro m eqns = ProR m (Seq0'2 eqns)
 
-> inversion = pro (red False [con False []]) 
+> inversion = pro (f0 [con False []]) 
 >              [cas ( AltR $ con True []
 >                   , NoAltR)]
 
-> conjunction = pro (red False [con False [], (red False [con True [], con False []])])
+> conjunction = pro (f0 [con False [], (f0 [con True [], con False []])])
 >               [cas ( AltR $ arg True
 >                    , AltR $ arg False )]
 
-> addition = pro (red False [one, one]) 
+> addition = pro (f0 [one, one]) 
 >              [cas ( AltR $ arg True
->                   , AltR $ con True [red False [pat False, arg True]])]
+>                   , AltR $ con True [rec [pat False, arg True]])]
 >  where one = con True [con False []]
 
-> append = pro (red False [singleton, singleton]) 
+> append = pro (f0 [singleton, singleton]) 
 >              [cas ( AltR $ arg True
->                   , AltR $ con True [pat False, red False [pat True, arg True]])]
+>                   , AltR $ con True [pat False, rec [pat True, arg True]])]
 >  where singleton = con True [con False [], con False []]
 
-> applen = pro (red len_ref [red app_ref [cons nil nil, nil]]) [len, app]
+> applen = pro (red (Abs len_ref) [red (Abs app_ref) [cons nil nil, nil]]) [len, app]
 >  where len_ref = False
 >        head_ref = True
 >        cons x xs | head_ref  = con True [xs, x]
@@ -1074,9 +1164,9 @@ Design choices:
 >        app_ref = not len_ref
 >        tail_ref = not head_ref
 >        len = cas ( AltR $ arg False
->                  , AltR $ cons nil (red False [pat $ tail_ref]))
+>                  , AltR $ cons nil (rec [pat $ tail_ref]))
 >        app = cas ( AltR $ arg True
->                  , AltR $ cons (pat head_ref) (red False [pat $ tail_ref, arg True]))
+>                  , AltR $ cons (pat head_ref) (rec [pat $ tail_ref, arg True]))
 
 > unitTests = mapM_ (flip depthCheck 1 . good)
 >             [inversion, conjunction, addition, append, applen]
@@ -1095,9 +1185,41 @@ Design choices:
 
 > names = lines "Validity\n+ Ordering + Use\n+Caller/Callee\n+Dead Computation\n+Dead Code"
 
+> stats = sequence_ [ do putStrLn i
+>                        pruneStats pred 3 >>= print . PST
+>                   | (i, pred) <- zip names experiments ]    
+
 > criterion = [ bench i $
 >               depthCheck (\x -> pred x *==>* True) 3
 >             | (i, pred) <- zip names experiments ]    
 
+> section =  do putStrLn "\nValid, non-redundant, 2"
+>               pruneStats valid 2 >>= print . PST
+>               putStrLn "\nOrdUse, non-redundant, 2"
+>               pruneStats (\x -> valid x |&&| ordUseP x) 2 >>= print . PST
+>               putStrLn "\nOrdUse, non-redundant, 3"
+>               pruneStats (\x -> valid x |&&| ordUseP x) 3 >>= print . PST
+>               putStrLn "\nNon-redundant, 3"
+>               pruneStats (experiments !! 2) 3 >>= print . PST
+>               putStrLn "\nNon-redundant, 4"
+>               pruneStats (experiments !! 2) 4 >>= print . PST
+>               putStrLn "\nDead Comp, 3"
+>               pruneStats (experiments !! 3) 3 >>= print . PST
+>               putStrLn "\nDead Comp, 4"
+>               pruneStats (experiments !! 3) 4 >>= print . PST
+>               putStrLn "\nDead Code, 3"
+>               pruneStats (experiments !! 4) 3 >>= print . PST
+>               putStrLn "\nDead Code, 4"
+>               pruneStats (experiments !! 4) 4 >>= print . PST
+
+> data Tests = Section_Stats
+>            | Perform_Stats
+>            | Perform_Exec
+>            | Sample Int
+
 > main = do hSetBuffering stdout NoBuffering
->           defaultMain criterion
+>           case Sample 4 of
+>             Section_Stats -> section
+>             Perform_Stats -> stats
+>             Perform_Exec  -> defaultMain criterion
+>             Sample d      -> sample' good d
