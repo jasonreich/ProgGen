@@ -1,0 +1,315 @@
+data D = A
+> A
+
+data D = A | B
+f x = case x of {A -> B}
+> f A
+
+data D = A
+f x y = case x of {A -> y}
+> f A A
+
+data D = A | B
+f x y = case x of {A -> y}
+> f A B
+
+data D = A D
+f = A f
+g x = case x of {A p -> p}
+> g f
+
+data D = A D
+f = A f
+g x = case x of {A p -> g p}
+> g f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B x y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y x; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y f; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B f y; B p q -> g p q}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> x; B p -> g y p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> x; B p -> g p y}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g x p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g y p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p x}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p y}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p A}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p f}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g A p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g f p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B x; B p -> g y p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B x; B p -> g p y}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g x p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g y p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p x}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p y}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p A}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p f}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g A p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g f p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B f; B p -> g y p}
+> g f A
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B f; B p -> g p y}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B x y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y x; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y f; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B f y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f f
+g x y = case x of {A -> B x y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f f
+g x y = case x of {A -> B y x; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f f
+g x y = case x of {A -> B y f; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B f f
+g x y = case x of {A -> B f y; B p q -> g p q}
+> g f A
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B x y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y x; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B y f; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B A f
+g x y = case x of {A -> B f y; B p q -> g p q}
+> g f f
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g p A}
+> g f f
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> y; B p -> g A p}
+> g f f
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g p A}
+> g f f
+
+data D = A | B D
+f = B f
+g x y = case x of {A -> B y; B p -> g A p}
+> g f f
+
+data D = A D
+f = A f
+g x y = case x of {A p -> g y p}
+> g f f
+
+data D = A D
+f = A f
+g x y = case x of {A p -> g p y}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B x y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y x; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y y; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B y f; B p q -> g p q}
+> g f f
+
+data D = A | B D D
+f = B f A
+g x y = case x of {A -> B f y; B p q -> g p q}
+> g f f
+
