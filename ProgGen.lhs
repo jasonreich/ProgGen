@@ -2,7 +2,7 @@
 % jason,mfn,colin
 % Forked 5/12/11
 
-> {-# LANGUAGE DeriveFunctor #-}
+> {-# LANGUAGE DeriveFunctor, DeriveDataTypeable #-}
 
 + > module ProgGen-LC where
 
@@ -28,13 +28,15 @@ Introduction
 This is a library that uses LazySmallCheck to generate canonical 
 first-order functional programs programs.
 
-> import Test.LazyCheck hiding (depth)
+> import Test.LazySmallCheck2012
+> import Test.LazySmallCheck2012.Core (Series(..), mkProperty)
 
 > import Criterion.Main
 > import Control.Applicative
 > import Control.Arrow
 > import Control.Monad (foldM, guard, MonadPlus(..))
 > import Control.Monad.Writer.Lazy hiding ((>=>), lift)
+> import Data.Generics (Data, Typeable)
 > import Data.Function
 > import Data.List
 > import Data.Maybe
@@ -43,15 +45,12 @@ first-order functional programs programs.
 > import System.IO
 > import Debug.Trace
 
-> (<.>) :: Series a -> (Int -> Int) -> Series a
-> xs <.> f = Series $ unSeries xs . f
-
 Small sequences
 ---------------
 
 These will be useful later on.
 
-> newtype Seq0'2 a = Seq0'2 [a] deriving (Ord,Eq, Functor)
+> newtype Seq0'2 a = Seq0'2 [a] deriving (Ord,Eq, Functor, Data, Typeable)
 > 
 > instance Show a => Show (Seq0'2 a) where
 >   show (Seq0'2 xs) = show xs
@@ -59,7 +58,7 @@ These will be useful later on.
 > instance Serial a => Serial (Seq0'2 a) where
 >   series = (Seq0'2 <$> Series children0'2) <.> (+1)
 >
-> children0'2 baseDepth = unSeries list (min baseDepth 2)
+> children0'2 baseDepth = runSeries list (min baseDepth 2)
 >   where list = pure [] <|>
 >                pure (:) <*> (series <.> const (baseDepth - 1)) <*> list
 
@@ -69,24 +68,33 @@ Our Language
 Our language can be represented as follows.
 
 > newtype Id = Id Char
+>   deriving (Data, Typeable)
 > 
 > data Pro = Pro (Seq1 ConDef) Exp (Seq RedDef)
+>   deriving (Data, Typeable)
 > 
 > data ConDef = Id :# Nat        -- Constructor definitions
+>   deriving (Data, Typeable)
 > 
 > data RedDef = Seq1 Id := Bod   -- Function definitions
+>   deriving (Data, Typeable)
 > 
 > data Bod = Solo Exp
 >          | Case Exp (Seq1 Alt)
+>   deriving (Data, Typeable)
 > data Exp = Var VarId           -- Variables
 >          | App DecId (Seq Exp) -- Applications
+>   deriving (Data, Typeable)
 > data VarId = Arg Id
 >            | Pat Id
+>   deriving (Data, Typeable)
 > 
 > data DecId = Con Id
 >            | Red Id
+>   deriving (Data, Typeable)
 > 
 > data Alt = Seq1 Id :--> Exp    -- Case alternatives
+>   deriving (Data, Typeable)
 
 And we can have a pretty printer associated with it.
 
@@ -150,29 +158,29 @@ We have an intermediate form which uses positional naming,
 represented by integers.
 
 > data ProP = ProP (Seq1 Nat) ExpP (Seq RedDefP)
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable)
 > 
 > data RedDefP = Nat :=: BodP   -- Function definitions
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 > 
 > data BodP = SoloP ExpP
 >           | CaseP ExpP (Seq1 AltP)
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 > 
 > data ExpP = VarP VarIdP           -- Variables
 >           | AppP DecIdP (Seq ExpP) -- Applications
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 > 
 > data VarIdP = ArgP Nat
 >             | PatP Nat
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 > 
 > data DecIdP = ConP Nat
 >             | RedP Nat
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 > 
 > data AltP = Nat :-->: ExpP    -- Case alternatives
->  deriving (Eq, Ord)
+>  deriving (Eq, Ord, Data, Typeable, Show)
 
 And translate this form into our original.
 
@@ -284,7 +292,7 @@ And translate this form into our original.
 > reachable m eqns = Set.fromList (zipWith (const . Nat) [0..] eqns) ==
 >                    fixSet [ Set.fromList $ consP b | _ :=: b <- eqns ] (Set.fromList $ redsPe m)
 
-> ordUseP :: ProP -> Pred
+> ordUseP :: ProP -> Property
 > ordUseP (ProP (Seq1 cons) m (Seq eqns)) 
 >   = orderedBy (<=) cons |&&|
 >     orderedBy (<)  eqns |&&|
@@ -301,7 +309,7 @@ Intermediate Form: Peano
 We have another intermediate form which uses positional naming, 
 represented by lazy peano naturals.
 
-> data Peano = Z | S Peano deriving (Show, Eq)
+> data Peano = Z | S Peano deriving (Show, Eq, Data, Typeable)
 >
 > instance Ord Peano where
 >  Z   <= _   = True
@@ -356,29 +364,29 @@ represented by lazy peano naturals.
 >                    | otherwise = (x `pSub` high) `pAdd` mp x xs
          
 > data ProL = ProL (Seq1 Peano) ExpL (Seq RedDefL)
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 > 
 > data RedDefL = Peano :=:: BodL   -- Function definitions
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 > 
 > data BodL = SoloL ExpL
 >           | CaseL ExpL (Seq1 AltL)
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 > 
 > data ExpL = VarL VarIdL           -- Variables
 >           | AppL DecIdL (Seq ExpL) -- Applications
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 > 
 > data VarIdL = ArgL Peano
 >             | PatL Peano
->    deriving (Show, Ord, Eq)
+>    deriving (Show, Ord, Eq, Data, Typeable)
 > 
 > data DecIdL = ConL Peano
 >             | RedL Peano
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 > 
 > data AltL = Peano :-->:: ExpL    -- Case alternatives
->    deriving (Ord, Eq)
+>    deriving (Ord, Eq, Data, Typeable)
 
 And translate this form into the previous.
 
@@ -420,30 +428,30 @@ Our current working representation is the non-redundant. It assumes;
      other function (True).
   *  in main as first (False) and second (True).
 
-> newtype Abs = Abs {unAbs :: Bool} deriving (Show, Eq, Ord)
-> newtype Rel = Rel {unRel :: Bool} deriving (Show, Eq, Ord)
+> newtype Abs = Abs {unAbs :: Bool} deriving (Show, Eq, Ord, Data, Typeable)
+> newtype Rel = Rel {unRel :: Bool} deriving (Show, Eq, Ord, Data, Typeable)
 
 > data ProR = ProR (ExpR Abs) (Seq0'2 BodR)
->           deriving Eq
+>           deriving (Eq, Data, Typeable)
 >
 > data BodR = SoloR (ExpR Rel)
 >           | CaseR (AltR, AltR)
->           deriving (Show, Eq, Ord)
+>           deriving (Show, Eq, Ord, Data, Typeable)
 >
 >
 > data AltR = NoAltR
 >           | AltR (ExpR Rel)
->           deriving (Show, Eq, Ord)
+>           deriving (Show, Eq, Ord, Data, Typeable)
 >
 > data ExpR a = VarR VarIdR
 >             | AppR (DecIdR a) (Seq0'2 (ExpR a))
->             deriving (Show, Eq, Ord, Functor)
+>             deriving (Show, Eq, Ord, Functor, Data, Typeable)
 >
 > data VarIdR = ArgR Bool | PatR Bool
->             deriving (Show, Eq, Ord)
+>             deriving (Show, Eq, Ord, Data, Typeable)
 >
 > data DecIdR a = ConR Bool | RedR a
->                 deriving (Show, Eq, Ord, Functor)
+>                 deriving (Show, Eq, Ord, Functor, Data, Typeable)
 
 Let us define some generic operations.
 
@@ -523,7 +531,7 @@ there are only two.
 > xor False x = x
 > xor True  x = not x
 >
-> conj :: Flag Bool -> Pred
+> conj :: Flag Bool -> Property
 > conj (Flag (flag, x)) = flag |&&| x
 >
 > mlookup :: MonadPlus m => Peano -> [a] -> m a
@@ -670,7 +678,7 @@ function definition,
 > wellCase (CaseR (NoAltR, NoAltR)) = False
 > wellCase _ = True
 
-> pvalidR :: ProR -> Pred
+> pvalidR :: ProR -> Property
 > pvalidR p@(ProR m (Seq0'2 eqns)) 
 >   = consistentRedApps p |&&|
 >     conj (wellRed p) |&&|
@@ -728,7 +736,7 @@ use and constructor references.
 >         check (S (S Z):_) (True:_) = False
 >         check _ _ = True
 
-> porduseR :: ProR -> Pred
+> porduseR :: ProR -> Property
 > porduseR p = conj (ordConArities p) |&&|
 >              conj (ordEqns p) |&&|
 >              conj (seqArgs p) |&&| 
@@ -818,7 +826,7 @@ Non-recursive, non-casey and no sharing.
 > noDupArgs = all (any snd) . groupBy ((==) `on` fst) 
 >             . sortBy (compare `on` fst) . concatMap binaryApps
 
-> pcallerR :: ProR -> Pred
+> pcallerR :: ProR -> Property
 > pcallerR p@(ProR m (Seq0'2 eqns)) = 
 >     noSoloId eqns |&&|
 >     all noCaseId eqns |&&|
@@ -847,8 +855,8 @@ Principle of Dead Computation
 >       = (destr && or [ True | VarR (PatR _) <- es ]) ||
 >         (and (f : redsIn f) && all (ste destr) es)
 
-> pdeadCompR :: ProR -> Pred
-> pdeadCompR (ProR _ (Seq0'2 eqns)) = mkPred $ noDeadComp eqns
+> pdeadCompR :: ProR -> Property
+> pdeadCompR (ProR _ (Seq0'2 eqns)) = mkProperty $ noDeadComp eqns
 
 Principle of Dead Code
 ----------------------
@@ -938,7 +946,7 @@ derivation depth, counting function calls.
 >                       (CaseR (a, b):_) -> (a /= NoAltR, b /= NoAltR)
 >                       _ -> (False, False)
 
-> pdeadCodeR :: ProR -> Pred
+> pdeadCodeR :: ProR -> Property
 > pdeadCodeR p = noDeadReds p |&&| conj (noDeadAlts p)
 
 Canonicalisation
@@ -1168,7 +1176,7 @@ Design choices:
 >        app = cas ( AltR $ arg True
 >                  , AltR $ cons (pat head_ref) (rec [pat $ tail_ref, arg True]))
 
-> unitTests = mapM_ (flip depthCheck 1 . good)
+> unitTests = mapM_ (depthCheck 1 . good)
 >             [inversion, conjunction, addition, append, applen]
 
 ===========================
@@ -1186,31 +1194,34 @@ Design choices:
 > names = lines "Validity\n+ Ordering + Use\n+Caller/Callee\n+Dead Computation\n+Dead Code"
 
 > stats = sequence_ [ do putStrLn i
->                        pruneStats pred 3 >>= print . PST
+>                        print (depthCheck_MR 3 pred)
 >                   | (i, pred) <- zip names experiments ]    
 
 > criterion = [ bench i $
->               depthCheck (\x -> pred x *==>* True) 3
+>               depthCheck 3 (\x -> pred x *==>* True)
 >             | (i, pred) <- zip names experiments ]    
 
+> prune :: PropertyLike b => (a -> b) -> (a -> Property)
+> prune f x = f x *==>* True
+>
 > section =  do putStrLn "\nValid, non-redundant, 2"
->               pruneStats valid 2 >>= print . PST
+>               print $ depthCheck_MR 2 $ prune $ valid
 >               putStrLn "\nOrdUse, non-redundant, 2"
->               pruneStats (\x -> valid x |&&| ordUseP x) 2 >>= print . PST
+>               print $ depthCheck_MR 2 $ prune $ (\x -> valid x |&&| ordUseP x)
 >               putStrLn "\nOrdUse, non-redundant, 3"
->               pruneStats (\x -> valid x |&&| ordUseP x) 3 >>= print . PST
+>               print $ depthCheck_MR 3 $ prune $ (\x -> valid x |&&| ordUseP x)
 >               putStrLn "\nNon-redundant, 3"
->               pruneStats (experiments !! 2) 3 >>= print . PST
+>               print $ depthCheck_MR 3 $ prune $ (experiments !! 2)
 >               putStrLn "\nNon-redundant, 4"
->               pruneStats (experiments !! 2) 4 >>= print . PST
+>               print $ depthCheck_MR 4 $ prune $ (experiments !! 2)
 >               putStrLn "\nDead Comp, 3"
->               pruneStats (experiments !! 3) 3 >>= print . PST
+>               print $ depthCheck_MR 3 $ prune $ (experiments !! 3)
 >               putStrLn "\nDead Comp, 4"
->               pruneStats (experiments !! 3) 4 >>= print . PST
+>               print $ depthCheck_MR 4 $ prune $ (experiments !! 3)
 >               putStrLn "\nDead Code, 3"
->               pruneStats (experiments !! 4) 3 >>= print . PST
+>               print $ depthCheck_MR 3 $ prune $ (experiments !! 4)
 >               putStrLn "\nDead Code, 4"
->               pruneStats (experiments !! 4) 4 >>= print . PST
+>               print $ depthCheck_MR 4 $ prune $ (experiments !! 4)
 
 > data Tests = Section_Stats
 >            | Perform_Stats
@@ -1218,8 +1229,8 @@ Design choices:
 >            | Sample Int
 
 > main = do hSetBuffering stdout NoBuffering
->           case Sample 4 of
+>           case Section_Stats of
 >             Section_Stats -> section
 >             Perform_Stats -> stats
 >             Perform_Exec  -> defaultMain criterion
->             Sample d      -> sample' good d
+>             -- Sample d      -> sample' good d
