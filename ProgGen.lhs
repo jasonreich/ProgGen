@@ -1194,34 +1194,32 @@ Design choices:
 > names = lines "Validity\n+ Ordering + Use\n+Caller/Callee\n+Dead Computation\n+Dead Code"
 
 > stats = sequence_ [ do putStrLn i
->                        print (depthCheck_MR 3 pred)
+>                        print (pruneStats 3 pred)
 >                   | (i, pred) <- zip names experiments ]    
 
 > criterion = [ bench i $
 >               depthCheck 3 (\x -> pred x *==>* True)
 >             | (i, pred) <- zip names experiments ]    
 
-> prune :: PropertyLike b => (a -> b) -> (a -> Property)
-> prune f x = f x *==>* True
 >
 > section =  do putStrLn "\nValid, non-redundant, 2"
->               print $ depthCheck_MR 2 $ prune $ valid
+>               print $ pruneStats 2 $ valid
 >               putStrLn "\nOrdUse, non-redundant, 2"
->               print $ depthCheck_MR 2 $ prune $ (\x -> valid x |&&| ordUseP x)
+>               print $ pruneStats 2 $ (\x -> valid x |&&| ordUseP x)
 >               putStrLn "\nOrdUse, non-redundant, 3"
->               print $ depthCheck_MR 3 $ prune $ (\x -> valid x |&&| ordUseP x)
+>               print $ pruneStats 3 $ (\x -> valid x |&&| ordUseP x)
 >               putStrLn "\nNon-redundant, 3"
->               print $ depthCheck_MR 3 $ prune $ (experiments !! 2)
+>               print $ pruneStats 3 $ (experiments !! 2)
 >               putStrLn "\nNon-redundant, 4"
->               print $ depthCheck_MR 4 $ prune $ (experiments !! 2)
+>               print $ pruneStats 4 $ (experiments !! 2)
 >               putStrLn "\nDead Comp, 3"
->               print $ depthCheck_MR 3 $ prune $ (experiments !! 3)
+>               print $ pruneStats 3 $ (experiments !! 3)
 >               putStrLn "\nDead Comp, 4"
->               print $ depthCheck_MR 4 $ prune $ (experiments !! 3)
+>               print $ pruneStats 4 $ (experiments !! 3)
 >               putStrLn "\nDead Code, 3"
->               print $ depthCheck_MR 3 $ prune $ (experiments !! 4)
+>               print $ pruneStats 3 $ (experiments !! 4)
 >               putStrLn "\nDead Code, 4"
->               print $ depthCheck_MR 4 $ prune $ (experiments !! 4)
+>               print $ pruneStats 4 $ (experiments !! 4)
 
 > data Tests = Section_Stats
 >            | Perform_Stats
