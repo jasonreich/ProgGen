@@ -31,7 +31,7 @@ first-order functional programs programs.
 > import Test.LazySmallCheck2012
 > import Test.LazySmallCheck2012.Core (Series(..), mkProperty)
 
-> import Criterion.Main
+> -- import Criterion.Main
 > import Control.Applicative
 > import Control.Arrow
 > import Control.Monad (foldM, guard, MonadPlus(..))
@@ -56,11 +56,8 @@ These will be useful later on.
 >   show (Seq0'2 xs) = show xs
 > 
 > instance Serial a => Serial (Seq0'2 a) where
->   series = (Seq0'2 <$> Series children0'2) <.> (+1)
->
-> children0'2 baseDepth = runSeries list (min baseDepth 2)
->   where list = pure [] <|>
->                pure (:) <*> (series <.> const (baseDepth - 1)) <*> list
+>   series = pure Seq0'2 `applZC` Series (\d -> runSeries (list d) 2)
+>     where list d = pure [] <|> ((:) <$> (series <.> const (d - 1)) <*> list d)
 
 Our Language
 ============
@@ -601,7 +598,7 @@ over the recursive structure ExpR.
 
 > depth :: Int -> Int -> Int
 > depth d d' | d >= 0    = d'+1-d
->            | otherwise = error "SmallCheck.depth: argument < 0"
+>            | otherwise = error "ProgGen.depth: argument < 0"
 >
 > instance Serial Abs where
 >    series = cons1 Abs <.> depth 0
@@ -1194,32 +1191,32 @@ Design choices:
 > names = lines "Validity\n+ Ordering + Use\n+Caller/Callee\n+Dead Computation\n+Dead Code"
 
 > stats = sequence_ [ do putStrLn i
->                        print (pruneStats 3 pred)
+>                        pruneStats 3 pred
 >                   | (i, pred) <- zip names experiments ]    
 
-> criterion = [ bench i $
+> criterion = undefined {- [ bench i $
 >               depthCheck 3 (\x -> pred x *==>* True)
->             | (i, pred) <- zip names experiments ]    
+>             | (i, pred) <- zip names experiments ]  -}
 
 >
-> section =  do putStrLn "\nValid, non-redundant, 2"
->               print $ pruneStats 2 $ valid
->               putStrLn "\nOrdUse, non-redundant, 2"
->               print $ pruneStats 2 $ (\x -> valid x |&&| ordUseP x)
->               putStrLn "\nOrdUse, non-redundant, 3"
->               print $ pruneStats 3 $ (\x -> valid x |&&| ordUseP x)
->               putStrLn "\nNon-redundant, 3"
->               print $ pruneStats 3 $ (experiments !! 2)
->               putStrLn "\nNon-redundant, 4"
->               print $ pruneStats 4 $ (experiments !! 2)
->               putStrLn "\nDead Comp, 3"
->               print $ pruneStats 3 $ (experiments !! 3)
->               putStrLn "\nDead Comp, 4"
->               print $ pruneStats 4 $ (experiments !! 3)
->               putStrLn "\nDead Code, 3"
->               print $ pruneStats 3 $ (experiments !! 4)
->               putStrLn "\nDead Code, 4"
->               print $ pruneStats 4 $ (experiments !! 4)
+> section =  do putStrLn "\nValid, original, 2"
+>               pruneStats 2 $ valid
+>               putStrLn "\nOrdUse, original, 2"
+>               pruneStats 2 $ (\x -> valid x |&&| ordUseP x)
+>               putStrLn "\nOrdUse, original, 3"
+>               pruneStats 3 $ (\x -> valid x |&&| ordUseP x)
+>               putStrLn "\nOrdUse, Non-redundant, 3"
+>               pruneStats 3 $ (experiments !! 2)
+>               putStrLn "\nOrdUse, Non-redundant, 4"
+>               pruneStats 4 $ (experiments !! 2)
+>               putStrLn "\nDead Comp, Non-redundant, 3"
+>               pruneStats 3 $ (experiments !! 3)
+>               putStrLn "\nDead Comp, Non-redundant, 4"
+>               pruneStats 4 $ (experiments !! 3)
+>               putStrLn "\nDead Code, Non-redundant, 3"
+>               pruneStats 3 $ (experiments !! 4)
+>               putStrLn "\nDead Code, Non-redundant, 4"
+>               pruneStats 4 $ (experiments !! 4)
 
 > data Tests = Section_Stats
 >            | Perform_Stats
@@ -1230,5 +1227,5 @@ Design choices:
 >           case Section_Stats of
 >             Section_Stats -> section
 >             Perform_Stats -> stats
->             Perform_Exec  -> defaultMain criterion
+>             Perform_Exec  -> undefined -- defaultMain criterion
 >             -- Sample d      -> sample' good d
